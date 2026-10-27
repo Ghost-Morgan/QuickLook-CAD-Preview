@@ -10,10 +10,10 @@ Use this document to review the changes and highlight any issues, unexpected beh
 
 | Area | Original State (`f065f79`) | Current State (`HEAD`) | Purpose / Impact |
 | :--- | :--- | :--- | :--- |
-| **CAD Loading** | Synchronous blocking load on UI thread | Asynchronous background loading (`Task.Run` + `CancellationTokenSource`) | Prevents QuickLook UI freeze when loading heavy `.dwg` / `.dxf` files |
-| **Panning & Redraw** | Re-rendered vector geometry on every mouse pixel movement (high CPU lag) | Captures the already-rendered control once per drag and blits that frame while moving; redraws through the normal CAD path on release | Keeps dragging responsive without changing how CAD geometry is rendered |
+| **CAD Loading** | Synchronous load on UI thread | Synchronous load retained to match CADImport's original rendering behavior | Avoids changing the CAD library's rendering behavior through thread-pool loading |
+| **Panning & Zoom Redraw** | Re-rendered vector geometry on every mouse pixel movement or wheel event | Uses a captured frame during drag and scales it on every zoom invalidation, then redraws CAD geometry after wheel input pauses | Keeps pan/zoom responsive without limiting the frame rate |
 | **Mouse Navigation** | Right mouse button drag only; double click ignored | Left, Middle (wheel drag), and Right drag for panning; double-click resets view | Matches AutoCAD / standard viewer UX conventions |
-| **Engine Optimizations** | Default CADImport rendering settings | Retains the CADImport defaults to preserve the original rendering and font behavior | Avoids orientation, font, and line-weight changes from non-default flags |
+| **Engine Optimizations** | Original preview drawing settings | Restores original geometry drawing settings and enables both SHX and TrueType text support | Preserves geometry rendering while allowing SHX text fallback |
 | **Project Dependencies** | Required local `QuickLook.Common.csproj` to exist | Conditional fallback: uses `QuickLook.Common.dll` directly if submodule isn't cloned | Enables building without cloning the full QuickLook source tree |
 | **Packaging Script** | Path relative issues when invoked outside `Scripts/` | Uses `$PSScriptRoot` for deterministic paths and `.FullName` in `Compress-Archive` | Generates valid `.qlplugin` regardless of current working directory |
 | **Packaging & Metadata** | Missing release metadata config in archive | Includes `QuickLook.Plugin.Metadata.config` in build output and final archive | Required by QuickLook for plugin discovery and versioning |
@@ -53,21 +53,14 @@ Use this document to review the changes and highlight any issues, unexpected beh
 * **File:** `QuickLook.Plugin.CADImport/Plugin.cs`
 
 #### What Changed:
-1. **Asynchronous Load & Busy Indicator in `View()`**:
+1. **Original Load & Busy Indicator in `View()`**:
    ```csharp
-   // BEFORE:
+   // Original:
    _rp.LoadCadFile(path);
    context.ViewerContent = _rp;
    context.IsBusy = false;
 
-   // AFTER:
-   context.ViewerContent = _rp;
-   context.IsBusy = true; // Shows QuickLook loading spinner
-
-   _rp.LoadCadFileAsync(path, () =>
-   {
-       context.IsBusy = false; // Hides spinner once ready
-   });
+   // Current: same UI-thread loading sequence.
    ```
 2. **Null-Safe Cleanup**:
    Added `if (_rp != null)` check prior to accessing `ActualWidth`/`ActualHeight` and disposing the control.
@@ -78,30 +71,27 @@ Use this document to review the changes and highlight any issues, unexpected beh
 * **File:** `QuickLook.Plugin.CADImport/RenderPanel.xaml.cs`
 
 #### What Changed:
-1. **Added Cancellation Token Management**:
-   ```csharp
-   private CancellationTokenSource _cts;
-   ```
-   Cancels any in-flight background parsing if the user switches files rapidly in QuickLook or closes the preview.
-2. **Added `LoadCadFileAsync(string path, Action onLoaded)`**:
-   - Offloads `CADImage.CreateImageByExtension(path)` and `image.LoadFromFile(path)` to a background thread (`Task.Run`).
-   - Marshals back to UI thread via `TaskScheduler.FromCurrentSynchronizationContext()` and calls `cadImaging.ApplyLoadedImage(...)`.
-3. **Disposal**:
-   Cancels and disposes `_cts` on control disposal to eliminate background thread leaks.
+1. **Loading**:
+   - Loads through the original UI-thread path to preserve CADImport's orientation and text rendering behavior.
+2. **Disposal**:
+   - Disposes the imaging engine and hosted CAD control during plugin cleanup.
 
 ---
 
 ### 2.4. CAD Rendering & Panning Engine (`CADImaging.cs` & Partial Files)
 
 #### A. CAD Rendering Defaults (`CADImaging.cs`)
-- Uses the original direct `CADImage.Draw(e.Graphics, ...)` path and CADImport defaults, preserving the plugin's established geometry, SHX text, and line-weight rendering behavior.
+- Uses the original direct `CADImage.Draw(e.Graphics, ...)` path and loads on the UI thread.
+- Enables both SHX and TrueType fonts so SHX text can use an available TrueType fallback while preserving SHX support.
+- Retains the original no-lineweight preview setting.
 
 #### B. High-Performance Panning Engine (`CADImaging.cs`)
 - **Problem in original code:** On every `MouseMove` event during drag, `cadImage.Draw(...)` was invoked. In complex drawings with 50,000+ entities, this caused severe UI lag (1–5 FPS).
 - **Solution implemented:**
   1. Captures the control's already-rendered frame once at drag start.
   2. Blits the captured frame at the accumulated pan offset during the drag, avoiding repeated CAD geometry rendering.
-  3. Discards the temporary frame on release and redraws using the original CADImport path.
+  3. For zoom, scales a captured frame for each invalidation while wheel input continues, without a frame-rate timer or cap.
+  4. Discards the temporary zoom frame after 120ms without wheel input and redraws using the original CADImport path.
 
 #### C. Mouse Controls Expansion (`CADImaging.cs`)
 - Enabled drag for:
@@ -165,7 +155,7 @@ When reviewing, consider whether any of these affect your specific use cases:
 1. **Trial Watermark / Licensing**:
    - `CADImport.dll` is a third-party commercial library by CadSoftTools. In demo/unregistered mode, it may render a trial watermark banner on exported/rendered images.
 2. **Line Weight Rendering**:
-   - `IsShowLineWeight = false` is enforced for rendering speed. If your drawings rely heavily on visual line thickness distinction, this can be made optional or restored.
+   - The plugin retains the original `IsShowLineWeight = false` preview setting.
 3. **SHX Fonts**:
    - The plugin retains CADImport's default SHX font handling so text remains consistent with the original preview behavior.
 4. **Target Framework Compatibility**:

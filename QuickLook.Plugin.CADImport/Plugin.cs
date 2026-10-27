@@ -15,6 +15,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+using CADImport;
 using QuickLook.Common.Helpers;
 using QuickLook.Common.Plugin;
 using System;
@@ -39,7 +40,11 @@ public class Plugin : IViewer
     private RenderPanel _rp;
     public int Priority => 0;
 
-    public void Init() { }
+    public void Init()
+    {
+        CADConst.UseSHXFonts = true;
+        CADConst.UseTTFFonts = true;
+    }
 
     public bool CanHandle(string path)
     {
@@ -58,13 +63,9 @@ public class Plugin : IViewer
         _rp = new RenderPanel();
         _rp.SetTheme(OSThemeHelper.AppsUseDarkTheme());
 
+        _rp.LoadCadFile(path);
         context.ViewerContent = _rp;
-        context.IsBusy = true;
-
-        _rp.LoadCadFileAsync(path, () =>
-        {
-            context.IsBusy = false;
-        });
+        context.IsBusy = false;
     }
 
     public void Cleanup()

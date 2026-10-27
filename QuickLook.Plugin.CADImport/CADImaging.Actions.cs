@@ -102,6 +102,7 @@ internal partial class CADImaging
         bool wasMouseDown = isMouseDown;
         isMouseDown = false;
         ClearPanFrame();
+        ClearZoomFrame();
         cadPictBox.Cursor = Cursors.Default;
         if (wasMouseDown)
             CursorUpdated?.Invoke(this, CADImagingEventArgs.NewCursorUpdatedEventArgs(Cursors.Default));

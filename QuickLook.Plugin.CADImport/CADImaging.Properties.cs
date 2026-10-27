@@ -65,9 +65,19 @@ internal partial class CADImaging
 
     private Bitmap _panFrame = null;
 
+    private Bitmap _zoomFrame = null;
+
+    private Timer _zoomPreviewTimer = null;
+
     private int panDeltaX = 0;
 
     private int panDeltaY = 0;
+
+    private float _zoomPreviewScale = 1f;
+
+    private float _zoomPreviewOffsetX;
+
+    private float _zoomPreviewOffsetY;
 
     private void ClearPanFrame()
     {
@@ -75,6 +85,16 @@ internal partial class CADImaging
         _panFrame = null;
         panDeltaX = 0;
         panDeltaY = 0;
+    }
+
+    private void ClearZoomFrame()
+    {
+        _zoomPreviewTimer?.Stop();
+        _zoomFrame?.Dispose();
+        _zoomFrame = null;
+        _zoomPreviewScale = 1f;
+        _zoomPreviewOffsetX = 0f;
+        _zoomPreviewOffsetY = 0f;
     }
 
     private float LeftImagePosition

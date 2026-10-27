@@ -66,11 +66,17 @@ internal partial class CADImaging : IDisposable
         cadPictBox.MouseDoubleClick += OnCADPictBoxMouseDoubleClick;
         cadPictBox.Resize += OnCADPictBoxResize;
         cadPictBox.VisibleChanged += OnCADPictBoxVisibleChanged;
+        _zoomPreviewTimer = new Timer { Interval = 120 };
+        _zoomPreviewTimer.Tick += OnZoomPreviewTimerTick;
     }
 
     public void Dispose()
     {
+        _zoomPreviewTimer?.Stop();
+        _zoomPreviewTimer?.Dispose();
+        _zoomPreviewTimer = null;
         ClearPanFrame();
+        ClearZoomFrame();
 
         cadPictBox = null;
         cadImage?.Dispose();
@@ -83,6 +89,7 @@ internal partial class CADImaging : IDisposable
             return;
 
         ClearPanFrame();
+        ClearZoomFrame();
         cadPictBox.Invalidate();
     }
 
@@ -104,16 +111,16 @@ internal partial class CADImaging : IDisposable
 
     private void OnCADPictBoxMouseWheel(object sender, MouseEventArgs e)
     {
-        if (e.Delta < 0)
-        {
-            Zoom(0.7f);
-        }
-        else
-        {
-            Zoom(1.3f);
-        }
+        float zoomRatio = e.Delta < 0 ? 0.7f : 1.3f;
+        StartZoomPreview();
+        float oldScale = imageScale;
+        Zoom(zoomRatio);
+        UpdateZoomPreview(imageScale / oldScale, e.Location);
+        positionPrev = e.Location;
         Shift();
         SetPictureBoxPosition(position);
+        _zoomPreviewTimer?.Stop();
+        _zoomPreviewTimer?.Start();
     }
 
     private void OnCADPictBoxScroll(object sender, ScrollEventArgsExt e)
@@ -137,6 +144,10 @@ internal partial class CADImaging : IDisposable
     {
         if (e.Button == MouseButtons.Left || e.Button == MouseButtons.Middle || e.Button == MouseButtons.Right)
         {
+            bool hadZoomPreview = _zoomFrame != null;
+            ClearZoomFrame();
+            if (hadZoomPreview)
+                cadPictBox.Invalidate();
             ClearPanFrame();
             if (cadPictBox.ClientSize.Width > 0 && cadPictBox.ClientSize.Height > 0)
             {
@@ -190,6 +201,12 @@ internal partial class CADImaging : IDisposable
         }
 
         ResetScaling();
+    }
+
+    private void OnZoomPreviewTimerTick(object sender, EventArgs e)
+    {
+        ClearZoomFrame();
+        cadPictBox?.Invalidate();
     }
 
     private void OnCADPictBoxMouseMove(object sender, MouseEventArgs e)
@@ -247,6 +264,27 @@ internal partial class CADImaging : IDisposable
             return;
         }
 
+        if (_zoomFrame != null)
+        {
+            e.Graphics.Clear(cadPictBox.BackColor);
+            var state = e.Graphics.Save();
+            try
+            {
+                using (var matrix = new System.Drawing.Drawing2D.Matrix(
+                    _zoomPreviewScale, 0f, 0f, _zoomPreviewScale,
+                    _zoomPreviewOffsetX, _zoomPreviewOffsetY))
+                {
+                    e.Graphics.Transform = matrix;
+                    e.Graphics.DrawImageUnscaled(_zoomFrame, 0, 0);
+                }
+            }
+            finally
+            {
+                e.Graphics.Restore(state);
+            }
+            return;
+        }
+
         try
         {
             DrawCADImage(e.Graphics);
@@ -296,6 +334,39 @@ internal partial class CADImaging : IDisposable
         catch
         {
         }
+    }
+
+    private void StartZoomPreview()
+    {
+        if (_zoomFrame != null || cadPictBox.ClientSize.Width <= 0 || cadPictBox.ClientSize.Height <= 0)
+            return;
+
+        _zoomFrame = new Bitmap(cadPictBox.ClientSize.Width, cadPictBox.ClientSize.Height);
+        try
+        {
+            using (var graphics = Graphics.FromImage(_zoomFrame))
+            {
+                graphics.CopyFromScreen(
+                    cadPictBox.PointToScreen(Point.Empty),
+                    Point.Empty,
+                    cadPictBox.ClientSize);
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Unable to capture CAD preview for zooming: {ex}");
+            ClearZoomFrame();
+        }
+    }
+
+    private void UpdateZoomPreview(float scaleRatio, Point anchor)
+    {
+        if (_zoomFrame == null)
+            return;
+
+        _zoomPreviewOffsetX = anchor.X + scaleRatio * (_zoomPreviewOffsetX - anchor.X);
+        _zoomPreviewOffsetY = anchor.Y + scaleRatio * (_zoomPreviewOffsetY - anchor.Y);
+        _zoomPreviewScale *= scaleRatio;
     }
 
     private void SetSizePictureBox(Size sz)
@@ -419,6 +490,9 @@ internal partial class CADImaging : IDisposable
 
     private void SetCADImageOptions()
     {
+        if (cadImage != null)
+            cadImage.IsShowLineWeight = false;
+
         CursorUpdated?.Invoke(this, CADImagingEventArgs.NewCursorUpdatedEventArgs(Cursors.Default));
 
         ObjEntity.cadImage = cadImage;
