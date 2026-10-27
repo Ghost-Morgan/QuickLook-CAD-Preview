@@ -19,6 +19,7 @@ using CADImport;
 using CADImport.FaceModule;
 using CADImport.RasterImage;
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.Windows.Forms;
@@ -491,7 +492,10 @@ internal partial class CADImaging : IDisposable
     private void SetCADImageOptions()
     {
         if (cadImage != null)
+        {
+            RecalculateModelExtents(cadImage);
             cadImage.IsShowLineWeight = false;
+        }
 
         CursorUpdated?.Invoke(this, CADImagingEventArgs.NewCursorUpdatedEventArgs(Cursors.Default));
 
@@ -521,6 +525,99 @@ internal partial class CADImaging : IDisposable
 
         Resize();
         SetPictureBoxPosition(position);
+    }
+
+    internal static void ConfigureImageFonts(CADImage image)
+    {
+        image.UseSHXFonts = CADConst.UseSHXFonts;
+        image.UseTTFFonts = CADConst.UseTTFFonts;
+        image.SearchSHXPaths = CADConst.SearchSHXPaths;
+        image.SHXSearchPaths = CADConst.SHXSearchPaths;
+    }
+
+    private static void RecalculateModelExtents(CADImage image)
+    {
+        var entities = image.CurrentLayout?.Entities;
+        if (entities == null || entities.Count < 3 || image.AbsWidth <= 0 || image.AbsHeight <= 0)
+            return;
+
+        double originalWidth = image.AbsWidth;
+        double originalHeight = image.AbsHeight;
+        double originLimitX = originalWidth * 0.001;
+        double originLimitY = originalHeight * 0.001;
+        var originProxies = new List<CADEntity>();
+        var originProxyIndices = new List<int>();
+        var centerXs = new List<double>();
+        var centerYs = new List<double>();
+        int entityIndex = 0;
+
+        foreach (CADEntity entity in entities)
+        {
+            int currentIndex = entityIndex++;
+            var box = entity.Box;
+            double left = Math.Min(box.TopLeft.X, box.BottomRight.X);
+            double right = Math.Max(box.TopLeft.X, box.BottomRight.X);
+            double bottom = Math.Min(box.TopLeft.Y, box.BottomRight.Y);
+            double top = Math.Max(box.TopLeft.Y, box.BottomRight.Y);
+            double centerX = (left + right) / 2d;
+            double centerY = (bottom + top) / 2d;
+            bool isSmallOriginProxy = entity is CADProxy &&
+                                      string.Equals(entity.Layer?.Name, "0", StringComparison.OrdinalIgnoreCase) &&
+                                      Math.Max(Math.Abs(left), Math.Abs(right)) <= originLimitX &&
+                                      Math.Max(Math.Abs(bottom), Math.Abs(top)) <= originLimitY &&
+                                      right - left <= originalWidth * 0.0001 &&
+                                      top - bottom <= originalHeight * 0.0001;
+            if (isSmallOriginProxy)
+            {
+                originProxies.Add(entity);
+                originProxyIndices.Add(currentIndex);
+                continue;
+            }
+
+            if (double.IsNaN(centerX) || double.IsInfinity(centerX) ||
+                double.IsNaN(centerY) || double.IsInfinity(centerY))
+                continue;
+
+            centerXs.Add(centerX);
+            centerYs.Add(centerY);
+        }
+
+        if (originProxies.Count == 0 || centerXs.Count == 0)
+            return;
+
+        centerXs.Sort();
+        centerYs.Sort();
+        double medianX = GetMedian(centerXs);
+        double medianY = GetMedian(centerYs);
+        if (Math.Abs(medianX) <= originLimitX && Math.Abs(medianY) <= originLimitY)
+            return;
+
+        foreach (var entity in originProxies)
+            entities.Remove(entity);
+
+        bool improvedExtents = false;
+        try
+        {
+            image.GetExtents();
+            improvedExtents = image.AbsWidth < originalWidth * 0.5 &&
+                              image.AbsHeight < originalHeight * 0.5;
+        }
+        finally
+        {
+            for (int i = 0; i < originProxies.Count; i++)
+                entities.Insert(originProxyIndices[i], originProxies[i]);
+
+            if (!improvedExtents)
+                image.GetExtents();
+        }
+    }
+
+    private static double GetMedian(List<double> values)
+    {
+        int middle = values.Count / 2;
+        return values.Count % 2 == 0
+            ? (values[middle - 1] + values[middle]) / 2d
+            : values[middle];
     }
 
     public void Invalidate()

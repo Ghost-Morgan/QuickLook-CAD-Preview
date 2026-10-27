@@ -10,10 +10,10 @@ Use this document to review the changes and highlight any issues, unexpected beh
 
 | Area | Original State (`f065f79`) | Current State (`HEAD`) | Purpose / Impact |
 | :--- | :--- | :--- | :--- |
-| **CAD Loading** | Synchronous load on UI thread | Synchronous load retained to match CADImport's original rendering behavior | Avoids changing the CAD library's rendering behavior through thread-pool loading |
+| **CAD Loading** | Synchronous load on UI thread | Parses files on a worker and applies the loaded image on the UI thread | Keeps QuickLook responsive while preserving UI-thread rendering |
 | **Panning & Zoom Redraw** | Re-rendered vector geometry on every mouse pixel movement or wheel event | Uses a captured frame during drag and scales it on every zoom invalidation, then redraws CAD geometry after wheel input pauses | Keeps pan/zoom responsive without limiting the frame rate |
 | **Mouse Navigation** | Right mouse button drag only; double click ignored | Left, Middle (wheel drag), and Right drag for panning; double-click resets view | Matches AutoCAD / standard viewer UX conventions |
-| **Engine Optimizations** | Original preview drawing settings | Restores original geometry drawing settings and enables both SHX and TrueType text support | Preserves geometry rendering while allowing SHX text fallback |
+| **Engine Optimizations** | Original preview drawing settings | Recomputes fit extents around tiny origin proxy outliers and discovers installed Autodesk SHX font folders | Prevents Civil 3D sample geometry from shrinking into a corner and improves SHX label rendering |
 | **Project Dependencies** | Required local `QuickLook.Common.csproj` to exist | Conditional fallback: uses `QuickLook.Common.dll` directly if submodule isn't cloned | Enables building without cloning the full QuickLook source tree |
 | **Packaging Script** | Path relative issues when invoked outside `Scripts/` | Uses `$PSScriptRoot` for deterministic paths and `.FullName` in `Compress-Archive` | Generates valid `.qlplugin` regardless of current working directory |
 | **Packaging & Metadata** | Missing release metadata config in archive | Includes `QuickLook.Plugin.Metadata.config` in build output and final archive | Required by QuickLook for plugin discovery and versioning |
@@ -53,15 +53,13 @@ Use this document to review the changes and highlight any issues, unexpected beh
 * **File:** `QuickLook.Plugin.CADImport/Plugin.cs`
 
 #### What Changed:
-1. **Original Load & Busy Indicator in `View()`**:
+1. **Loading & Busy Indicator in `View()`**:
    ```csharp
-   // Original:
-   _rp.LoadCadFile(path);
    context.ViewerContent = _rp;
-   context.IsBusy = false;
-
-   // Current: same UI-thread loading sequence.
+   context.IsBusy = true;
+   _rp.LoadCadFileAsync(path, () => context.IsBusy = false);
    ```
+   The CADImport parse runs in the background; the loaded image is installed and rendered on the WPF dispatcher. Failed or unsupported files show an in-preview error message instead of leaving a blank viewer.
 2. **Null-Safe Cleanup**:
    Added `if (_rp != null)` check prior to accessing `ActualWidth`/`ActualHeight` and disposing the control.
 
@@ -72,7 +70,9 @@ Use this document to review the changes and highlight any issues, unexpected beh
 
 #### What Changed:
 1. **Loading**:
-   - Loads through the original UI-thread path to preserve CADImport's orientation and text rendering behavior.
+   - Parses files on a worker thread and marshals image installation back to the WPF dispatcher.
+   - Cancellation and disposal prevent a completed load from being applied after the preview closes.
+   - Displays a clear message when parsing fails or the engine cannot create an image for the file.
 2. **Disposal**:
    - Disposes the imaging engine and hosted CAD control during plugin cleanup.
 
@@ -81,8 +81,9 @@ Use this document to review the changes and highlight any issues, unexpected beh
 ### 2.4. CAD Rendering & Panning Engine (`CADImaging.cs` & Partial Files)
 
 #### A. CAD Rendering Defaults (`CADImaging.cs`)
-- Uses the original direct `CADImage.Draw(e.Graphics, ...)` path and loads on the UI thread.
-- Enables both SHX and TrueType fonts so SHX text can use an available TrueType fallback while preserving SHX support.
+- Uses the original direct `CADImage.Draw(e.Graphics, ...)` path.
+- Enables SHX and TrueType fonts and searches installed AutoCAD/TrueView font directories.
+- Before fitting, detects tiny layer-0 proxy outliers close to the origin only when the rest of the model is clearly displaced and recomputing extents substantially reduces both dimensions. The proxies remain in the drawing and their original entity order is restored; only the fit extents change.
 - Retains the original no-lineweight preview setting.
 
 #### B. High-Performance Panning Engine (`CADImaging.cs`)
@@ -157,6 +158,8 @@ When reviewing, consider whether any of these affect your specific use cases:
 2. **Line Weight Rendering**:
    - The plugin retains the original `IsShowLineWeight = false` preview setting.
 3. **SHX Fonts**:
-   - The plugin retains CADImport's default SHX font handling so text remains consistent with the original preview behavior.
-4. **Target Framework Compatibility**:
+   - The plugin enables SHX/TrueType support and discovers installed Autodesk font folders. It does not redistribute Autodesk fonts; SHX labels still depend on the appropriate font being installed.
+4. **Civil 3D objects**:
+   - The bundled CADImport engine exposes generic proxy entities for this sample's Civil 3D objects. The plugin can show available proxy graphics, but it does not provide verified native surface/alignment/profile-view interpretation.
+5. **Target Framework Compatibility**:
    - Built targeting `net462` to match standard QuickLook runtime assemblies. If running on a non-Windows or strictly modern .NET Core runtime, QuickLook requires its Windows-specific desktop bridge.

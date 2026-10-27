@@ -19,6 +19,8 @@ using CADImport;
 using QuickLook.Common.Helpers;
 using QuickLook.Common.Plugin;
 using System;
+using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Windows;
@@ -44,6 +46,67 @@ public class Plugin : IViewer
     {
         CADConst.UseSHXFonts = true;
         CADConst.UseTTFFonts = true;
+        ConfigureSHXSearchPaths();
+    }
+
+    private static void ConfigureSHXSearchPaths()
+    {
+        var searchPaths = new List<string>();
+        foreach (var existingPath in (CADConst.SHXSearchPaths ?? string.Empty).Split(Path.PathSeparator))
+        {
+            AddFontSearchPath(searchPaths, existingPath);
+        }
+
+        var installationRoots = new[]
+        {
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+        };
+
+        foreach (var root in installationRoots)
+        {
+            if (string.IsNullOrEmpty(root))
+                continue;
+
+            var autodeskRoot = Path.Combine(root, "Autodesk");
+            if (!Directory.Exists(autodeskRoot))
+                continue;
+
+            try
+            {
+                foreach (var installPath in Directory.GetDirectories(autodeskRoot))
+                {
+                    var name = Path.GetFileName(installPath);
+                    if (name.StartsWith("AutoCAD", StringComparison.OrdinalIgnoreCase) ||
+                        name.StartsWith("DWG TrueView", StringComparison.OrdinalIgnoreCase))
+                    {
+                        AddFontSearchPath(searchPaths, Path.Combine(installPath, "Fonts"));
+                    }
+                }
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                Debug.WriteLine($"Unable to inspect Autodesk font directories: {ex}");
+            }
+        }
+
+        var commonProgramFiles = Environment.GetFolderPath(Environment.SpecialFolder.CommonProgramFiles);
+        AddFontSearchPath(searchPaths, Path.Combine(commonProgramFiles, "Autodesk Shared", "Fonts"));
+
+        if (searchPaths.Count > 0)
+        {
+            CADConst.SHXSearchPaths = string.Join(Path.PathSeparator.ToString(), searchPaths);
+            CADConst.SearchSHXPaths = true;
+        }
+    }
+
+    private static void AddFontSearchPath(List<string> paths, string path)
+    {
+        if (Directory.Exists(path) &&
+            !paths.Exists(existingPath => string.Equals(existingPath, path, StringComparison.OrdinalIgnoreCase)))
+        {
+            paths.Add(path);
+        }
     }
 
     public bool CanHandle(string path)
@@ -63,9 +126,9 @@ public class Plugin : IViewer
         _rp = new RenderPanel();
         _rp.SetTheme(OSThemeHelper.AppsUseDarkTheme());
 
-        _rp.LoadCadFile(path);
         context.ViewerContent = _rp;
-        context.IsBusy = false;
+        context.IsBusy = true;
+        _rp.LoadCadFileAsync(path, () => context.IsBusy = false);
     }
 
     public void Cleanup()

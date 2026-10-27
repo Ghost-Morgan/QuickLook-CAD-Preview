@@ -17,14 +17,19 @@
 
 using CADImport;
 using CADImport.FaceModule;
+using System;
+using System.Diagnostics;
+using System.Threading;
+using System.Threading.Tasks;
 using UserControl = System.Windows.Controls.UserControl;
 
 namespace QuickLook.Plugin.CADImport;
 
-public partial class RenderPanel : UserControl
+public partial class RenderPanel : UserControl, IDisposable
 {
     private CADImaging cadImaging;
     private CADPictureBox cadPictBox;
+    private CancellationTokenSource _cts;
 
     public RenderPanel()
     {
@@ -36,11 +41,103 @@ public partial class RenderPanel : UserControl
 
     public void Dispose()
     {
+        _cts?.Cancel();
+        _cts?.Dispose();
+        _cts = null;
+
         cadImaging?.Dispose();
         cadImaging = null;
 
         cadPictBox?.Dispose();
         cadPictBox = null;
+    }
+
+    public void LoadCadFileAsync(string path, Action onLoaded = null)
+    {
+        loadErrorMessage.Visibility = System.Windows.Visibility.Collapsed;
+        _cts?.Cancel();
+        _cts?.Dispose();
+        _cts = new CancellationTokenSource();
+        var token = _cts.Token;
+
+        Task.Run(() =>
+        {
+            if (token.IsCancellationRequested)
+                return null;
+
+            CADImage image = null;
+            try
+            {
+                image = CADImage.CreateImageByExtension(path);
+                if (image != null)
+                {
+                    CADImaging.ConfigureImageFonts(image);
+                    if (CADConst.IsWebPath(path))
+                        image.LoadFromWeb(path);
+                    else
+                        image.LoadFromFile(path);
+                }
+            }
+            catch
+            {
+                image?.Dispose();
+                throw;
+            }
+
+            return image;
+        }, token).ContinueWith(t => Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (t.IsCanceled)
+                return;
+
+            if (t.IsFaulted)
+            {
+                Debug.WriteLine($"Error loading CAD file: {t.Exception}");
+                ShowLoadError();
+                onLoaded?.Invoke();
+                return;
+            }
+
+            var loadedImage = t.Result;
+            if (token.IsCancellationRequested)
+            {
+                loadedImage?.Dispose();
+                return;
+            }
+
+            if (loadedImage == null)
+            {
+                ShowLoadError();
+                onLoaded?.Invoke();
+                return;
+            }
+
+            if (cadImaging == null)
+            {
+                loadedImage.Dispose();
+                return;
+            }
+
+            try
+            {
+                cadImaging.ApplyLoadedImage(loadedImage, path);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error preparing CAD preview: {ex}");
+                ShowLoadError();
+            }
+            finally
+            {
+                onLoaded?.Invoke();
+            }
+        })), CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
+    }
+
+    private void ShowLoadError()
+    {
+        loadErrorMessage.Text = "Unable to preview this CAD file.";
+        loadErrorMessage.Visibility = System.Windows.Visibility.Visible;
     }
 
     public void LoadCadFile(string path)

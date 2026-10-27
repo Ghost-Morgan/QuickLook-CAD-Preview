@@ -59,6 +59,8 @@ internal partial class CADImaging
             imageScalePrev = 1f;
             position = new PointF();
             cadImage = CADImage.CreateImageByExtension(fileName);
+            if (cadImage != null)
+                ConfigureImageFonts(cadImage);
         }
 
         if (cadImage != null)

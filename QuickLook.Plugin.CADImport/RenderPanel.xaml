@@ -8,5 +8,16 @@
              mc:Ignorable="d">
     <Grid>
         <WindowsFormsHost Name="presenter" />
+        <TextBlock x:Name="loadErrorMessage"
+                   HorizontalAlignment="Center"
+                   VerticalAlignment="Center"
+                   Margin="24"
+                   TextAlignment="Center"
+                   TextWrapping="Wrap"
+                   Foreground="White"
+                   Background="#CC202020"
+                   Padding="16"
+                   Visibility="Collapsed"
+                   IsHitTestVisible="False" />
     </Grid>
 </UserControl>
