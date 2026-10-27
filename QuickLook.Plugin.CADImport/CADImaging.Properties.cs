@@ -63,15 +63,19 @@ internal partial class CADImaging
 
     private bool drawingColor;
 
-    private Bitmap _cachedRenderBitmap = null;
-
-    private bool _needsFullRedraw = true;
+    private Bitmap _panFrame = null;
 
     private int panDeltaX = 0;
 
     private int panDeltaY = 0;
 
-    private Timer _panDebounceTimer = null;
+    private void ClearPanFrame()
+    {
+        _panFrame?.Dispose();
+        _panFrame = null;
+        panDeltaX = 0;
+        panDeltaY = 0;
+    }
 
     private float LeftImagePosition
     {

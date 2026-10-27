@@ -11,9 +11,9 @@ Use this document to review the changes and highlight any issues, unexpected beh
 | Area | Original State (`f065f79`) | Current State (`HEAD`) | Purpose / Impact |
 | :--- | :--- | :--- | :--- |
 | **CAD Loading** | Synchronous blocking load on UI thread | Asynchronous background loading (`Task.Run` + `CancellationTokenSource`) | Prevents QuickLook UI freeze when loading heavy `.dwg` / `.dxf` files |
-| **Panning & Redraw** | Re-rendered vector geometry on every mouse pixel movement (high CPU lag) | Cached off-screen bitmap blit during dragging + 150ms debounce full redraw | Smooth 60 FPS panning even with large drawings |
+| **Panning & Redraw** | Re-rendered vector geometry on every mouse pixel movement (high CPU lag) | Captures the already-rendered control once per drag and blits that frame while moving; redraws through the normal CAD path on release | Keeps dragging responsive without changing how CAD geometry is rendered |
 | **Mouse Navigation** | Right mouse button drag only; double click ignored | Left, Middle (wheel drag), and Right drag for panning; double-click resets view | Matches AutoCAD / standard viewer UX conventions |
-| **Engine Optimizations** | Default CADImport settings (attempted slow SHX font searches & line weight calculations) | Global settings disable SHX disk scans; set circle resolution (24 parts), disable line weights | Faster parse times; eliminates missing font stalls |
+| **Engine Optimizations** | Default CADImport rendering settings | Retains the CADImport defaults to preserve the original rendering and font behavior | Avoids orientation, font, and line-weight changes from non-default flags |
 | **Project Dependencies** | Required local `QuickLook.Common.csproj` to exist | Conditional fallback: uses `QuickLook.Common.dll` directly if submodule isn't cloned | Enables building without cloning the full QuickLook source tree |
 | **Packaging Script** | Path relative issues when invoked outside `Scripts/` | Uses `$PSScriptRoot` for deterministic paths and `.FullName` in `Compress-Archive` | Generates valid `.qlplugin` regardless of current working directory |
 | **Packaging & Metadata** | Missing release metadata config in archive | Includes `QuickLook.Plugin.Metadata.config` in build output and final archive | Required by QuickLook for plugin discovery and versioning |
@@ -53,14 +53,7 @@ Use this document to review the changes and highlight any issues, unexpected beh
 * **File:** `QuickLook.Plugin.CADImport/Plugin.cs`
 
 #### What Changed:
-1. **Global Configuration in `Init()`**:
-   ```csharp
-   public void Init()
-   {
-       CADImaging.ConfigureGlobalSettings();
-   }
-   ```
-2. **Asynchronous Load & Busy Indicator in `View()`**:
+1. **Asynchronous Load & Busy Indicator in `View()`**:
    ```csharp
    // BEFORE:
    _rp.LoadCadFile(path);
@@ -76,7 +69,7 @@ Use this document to review the changes and highlight any issues, unexpected beh
        context.IsBusy = false; // Hides spinner once ready
    });
    ```
-3. **Null-Safe Cleanup**:
+2. **Null-Safe Cleanup**:
    Added `if (_rp != null)` check prior to accessing `ActualWidth`/`ActualHeight` and disposing the control.
 
 ---
@@ -92,7 +85,6 @@ Use this document to review the changes and highlight any issues, unexpected beh
    Cancels any in-flight background parsing if the user switches files rapidly in QuickLook or closes the preview.
 2. **Added `LoadCadFileAsync(string path, Action onLoaded)`**:
    - Offloads `CADImage.CreateImageByExtension(path)` and `image.LoadFromFile(path)` to a background thread (`Task.Run`).
-   - Applies optimizations (`CADImaging.OptimizeImage(image)`) before UI rendering.
    - Marshals back to UI thread via `TaskScheduler.FromCurrentSynchronizationContext()` and calls `cadImaging.ApplyLoadedImage(...)`.
 3. **Disposal**:
    Cancels and disposes `_cts` on control disposal to eliminate background thread leaks.
@@ -101,24 +93,15 @@ Use this document to review the changes and highlight any issues, unexpected beh
 
 ### 2.4. CAD Rendering & Panning Engine (`CADImaging.cs` & Partial Files)
 
-#### A. Global Settings & Optimization (`CADImaging.cs`)
-- Added `ConfigureGlobalSettings()`:
-  - `CADConst.SearchSHXPaths = false`: Prevents lengthy timeouts scanning Windows directories for missing AutoCAD font shapes.
-  - `CADConst.UseSHXFonts = false` & `CADConst.UseTTFFonts = true`: Favors TrueType system fonts.
-  - `CADConst.LogFilePath = null`: Disables file I/O debug logging.
-- Added `OptimizeImage(CADImage img)`:
-  - `img.UseDoubleBuffering = true`
-  - `img.UseWinEllipse = true`
-  - `img.NumberOfPartsInCircle = 24` (reduces curve tessellation overhead)
-  - `img.InterpolationMode = Low`
-  - `img.IsShowLineWeight = false` (avoids expensive pen-stroke thickness recalculation)
+#### A. CAD Rendering Defaults (`CADImaging.cs`)
+- Uses the original direct `CADImage.Draw(e.Graphics, ...)` path and CADImport defaults, preserving the plugin's established geometry, SHX text, and line-weight rendering behavior.
 
 #### B. High-Performance Panning Engine (`CADImaging.cs`)
 - **Problem in original code:** On every `MouseMove` event during drag, `cadImage.Draw(...)` was invoked. In complex drawings with 50,000+ entities, this caused severe UI lag (1–5 FPS).
 - **Solution implemented:**
-  1. A cached off-screen bitmap (`_cachedRenderBitmap`) holds the current rendered frame.
-  2. While `isMouseDown == true`, `OnCADPictBoxPaint` executes an **instant memory blit** (`e.Graphics.DrawImageUnscaled(_cachedRenderBitmap, panDeltaX, panDeltaY)`), giving silky 60 FPS movement.
-  3. A 150ms debounce timer (`_panDebounceTimer`) triggers a full vector redraw only when the user finishes dragging or pauses, ensuring crisp rendering at the new position.
+  1. Captures the control's already-rendered frame once at drag start.
+  2. Blits the captured frame at the accumulated pan offset during the drag, avoiding repeated CAD geometry rendering.
+  3. Discards the temporary frame on release and redraws using the original CADImport path.
 
 #### C. Mouse Controls Expansion (`CADImaging.cs`)
 - Enabled drag for:
@@ -128,7 +111,6 @@ Use this document to review the changes and highlight any issues, unexpected beh
 - Added double-click listener (`OnCADPictBoxMouseDoubleClick`) that calls `ResetScaling()` (fit to window).
 
 #### D. Safe State Management (`CADImaging.Actions.cs` & `CADImaging.Properties.cs`)
-- Added `_needsFullRedraw` flag across zoom, resize, visibility change, and text visibility toggles.
 - Added `ApplyLoadedImage(CADImage loadedImage, string fileName)` to cleanly replace an existing loaded image without memory leaks or race conditions.
 
 ---
@@ -185,6 +167,6 @@ When reviewing, consider whether any of these affect your specific use cases:
 2. **Line Weight Rendering**:
    - `IsShowLineWeight = false` is enforced for rendering speed. If your drawings rely heavily on visual line thickness distinction, this can be made optional or restored.
 3. **SHX Fonts**:
-   - `UseSHXFonts = false` causes text styled with AutoCAD `.shx` shapes to map to TrueType alternatives. If specific engineering symbols require SHX files, the font search directory path may need to be specified.
+   - The plugin retains CADImport's default SHX font handling so text remains consistent with the original preview behavior.
 4. **Target Framework Compatibility**:
    - Built targeting `net462` to match standard QuickLook runtime assemblies. If running on a non-Windows or strictly modern .NET Core runtime, QuickLook requires its Windows-specific desktop bridge.

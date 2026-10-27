@@ -39,10 +39,7 @@ public class Plugin : IViewer
     private RenderPanel _rp;
     public int Priority => 0;
 
-    public void Init()
-    {
-        CADImaging.ConfigureGlobalSettings();
-    }
+    public void Init() { }
 
     public bool CanHandle(string path)
     {

@@ -59,8 +59,6 @@ public partial class RenderPanel : UserControl, IDisposable
         _cts = new CancellationTokenSource();
         var token = _cts.Token;
 
-        CADImaging.ConfigureGlobalSettings();
-
         Task.Run(() =>
         {
             if (token.IsCancellationRequested)
@@ -72,8 +70,6 @@ public partial class RenderPanel : UserControl, IDisposable
                 image = CADImage.CreateImageByExtension(path);
                 if (image != null)
                 {
-                    CADImaging.OptimizeImage(image);
-
                     if (CADConst.IsWebPath(path))
                         image.LoadFromWeb(path);
                     else
@@ -90,19 +86,36 @@ public partial class RenderPanel : UserControl, IDisposable
             return image;
         }, token).ContinueWith(t =>
         {
-            if (token.IsCancellationRequested)
+            if (t.IsCanceled)
+                return;
+
+            if (t.IsFaulted)
             {
-                t.Result?.Dispose();
+                Debug.WriteLine($"Error loading CAD file: {t.Exception}");
+                onLoaded?.Invoke();
                 return;
             }
 
-            if (t.IsFaulted || t.Result == null)
+            var loadedImage = t.Result;
+            if (token.IsCancellationRequested)
+            {
+                loadedImage?.Dispose();
+                return;
+            }
+
+            if (loadedImage == null)
             {
                 onLoaded?.Invoke();
                 return;
             }
 
-            cadImaging?.ApplyLoadedImage(t.Result, path);
+            if (cadImaging == null)
+            {
+                loadedImage.Dispose();
+                return;
+            }
+
+            cadImaging.ApplyLoadedImage(loadedImage, path);
             onLoaded?.Invoke();
         }, TaskScheduler.FromCurrentSynchronizationContext());
     }

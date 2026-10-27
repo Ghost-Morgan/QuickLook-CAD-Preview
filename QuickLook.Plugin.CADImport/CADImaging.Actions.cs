@@ -45,8 +45,6 @@ internal partial class CADImaging
 
     public void LoadFile(string fileName)
     {
-        ConfigureGlobalSettings();
-
         if (fileName != null)
         {
             if (cadImage != null)
@@ -65,8 +63,6 @@ internal partial class CADImaging
 
         if (cadImage != null)
         {
-            OptimizeImage(cadImage);
-
             if (CADConst.IsWebPath(fileName))
                 cadImage.LoadFromWeb(fileName);
             else
@@ -75,8 +71,6 @@ internal partial class CADImaging
         LastLoadedFilePath = fileName;
 
         SetCADImageOptions();
-        _needsFullRedraw = true;
-
         AfterLoaded?.Invoke(this, fileName);
     }
 
@@ -98,7 +92,6 @@ internal partial class CADImaging
         LastLoadedFilePath = fileName;
 
         SetCADImageOptions();
-        _needsFullRedraw = true;
         cadPictBox?.Invalidate();
 
         AfterLoaded?.Invoke(this, fileName);
@@ -106,11 +99,16 @@ internal partial class CADImaging
 
     public void ResetScaling()
     {
+        bool wasMouseDown = isMouseDown;
+        isMouseDown = false;
+        ClearPanFrame();
+        cadPictBox.Cursor = Cursors.Default;
+        if (wasMouseDown)
+            CursorUpdated?.Invoke(this, CADImagingEventArgs.NewCursorUpdatedEventArgs(Cursors.Default));
         imageScale = 1f;
         imageScalePrev = 1f;
         LeftImagePosition = (cadPictBox.ClientRectangle.Width - visibleArea.Width) / 2f;
         TopImagePosition = (cadPictBox.ClientRectangle.Height - visibleArea.Height) / 2f;
-        _needsFullRedraw = true;
         cadPictBox.Invalidate();
     }
 
@@ -119,7 +117,6 @@ internal partial class CADImaging
         Zoom(1.3f);
         Shift();
         SetPictureBoxPosition(position);
-        _needsFullRedraw = true;
         cadPictBox.Invalidate();
     }
 
@@ -128,7 +125,6 @@ internal partial class CADImaging
         Zoom(0.7f);
         Shift();
         SetPictureBoxPosition(position);
-        _needsFullRedraw = true;
         cadPictBox.Invalidate();
     }
 
@@ -137,7 +133,6 @@ internal partial class CADImaging
         Zoom(scaleRatio);
         Shift();
         SetPictureBoxPosition(position);
-        _needsFullRedraw = true;
         cadPictBox.Invalidate();
     }
 
@@ -155,7 +150,6 @@ internal partial class CADImaging
         {
             clipRectangle.Color = Color.Black;
         }
-        _needsFullRedraw = true;
     }
 
     public void SetBlackRender()
@@ -172,7 +166,6 @@ internal partial class CADImaging
         {
             clipRectangle.Color = Color.White;
         }
-        _needsFullRedraw = true;
     }
 
     public void SetNormalColor()
@@ -183,7 +176,6 @@ internal partial class CADImaging
         }
 
         cadImage.DrawMode = CADDrawMode.Normal;
-        _needsFullRedraw = true;
         cadPictBox.Invalidate();
     }
 
@@ -195,7 +187,6 @@ internal partial class CADImaging
         }
 
         cadImage.DrawMode = CADDrawMode.Black;
-        _needsFullRedraw = true;
         cadPictBox.Invalidate();
     }
 
@@ -204,7 +195,6 @@ internal partial class CADImaging
         textVisible = isTextVisible;
         if (cadImage != null)
             cadImage.TextVisible = isTextVisible;
-        _needsFullRedraw = true;
         cadPictBox.Invalidate();
         return textVisible;
     }
@@ -214,7 +204,6 @@ internal partial class CADImaging
         textVisible = !textVisible;
         if (cadImage != null)
             cadImage.TextVisible = textVisible;
-        _needsFullRedraw = true;
         cadPictBox.Invalidate();
         return textVisible;
     }

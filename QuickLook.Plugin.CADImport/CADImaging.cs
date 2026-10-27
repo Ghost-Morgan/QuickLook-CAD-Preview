@@ -66,60 +66,15 @@ internal partial class CADImaging : IDisposable
         cadPictBox.MouseDoubleClick += OnCADPictBoxMouseDoubleClick;
         cadPictBox.Resize += OnCADPictBoxResize;
         cadPictBox.VisibleChanged += OnCADPictBoxVisibleChanged;
-
-        _panDebounceTimer = new Timer { Interval = 150 };
-        _panDebounceTimer.Tick += OnPanDebounceTick;
     }
 
     public void Dispose()
     {
-        _panDebounceTimer?.Stop();
-        _panDebounceTimer?.Dispose();
-        _panDebounceTimer = null;
-
-        _cachedRenderBitmap?.Dispose();
-        _cachedRenderBitmap = null;
+        ClearPanFrame();
 
         cadPictBox = null;
         cadImage?.Dispose();
         cadImage = null;
-    }
-
-    public static void ConfigureGlobalSettings()
-    {
-        try
-        {
-            CADConst.SearchSHXPaths = false;
-            CADConst.UseSHXFonts = false;
-            CADConst.UseTTFFonts = true;
-            CADConst.LogFilePath = null;
-        }
-        catch
-        {
-        }
-    }
-
-    public static void OptimizeImage(CADImage img)
-    {
-        if (img == null)
-            return;
-
-        try
-        {
-            img.UseDoubleBuffering = true;
-            img.UseWinEllipse = true;
-            img.NumberOfPartsInCircle = 24;
-            img.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.Low;
-            img.IsShowLineWeight = false;
-            if (img.Painter?.Settings != null)
-            {
-                img.Painter.Settings.TTFSmoothing = TTFSmoothing.Auto;
-                img.Painter.Settings.IsShowLineWeight = false;
-            }
-        }
-        catch
-        {
-        }
     }
 
     private void OnCADPictBoxResize(object sender, EventArgs e)
@@ -127,7 +82,7 @@ internal partial class CADImaging : IDisposable
         if (cadImage == null || cadPictBox == null)
             return;
 
-        _needsFullRedraw = true;
+        ClearPanFrame();
         cadPictBox.Invalidate();
     }
 
@@ -175,7 +130,6 @@ internal partial class CADImaging : IDisposable
         {
             LeftImagePosition -= e.NewValue - e.OldValue;
         }
-        _needsFullRedraw = true;
         cadPictBox.Invalidate();
     }
 
@@ -183,8 +137,31 @@ internal partial class CADImaging : IDisposable
     {
         if (e.Button == MouseButtons.Left || e.Button == MouseButtons.Middle || e.Button == MouseButtons.Right)
         {
+            ClearPanFrame();
+            if (cadPictBox.ClientSize.Width > 0 && cadPictBox.ClientSize.Height > 0)
+            {
+                _panFrame = new Bitmap(cadPictBox.ClientSize.Width, cadPictBox.ClientSize.Height);
+                try
+                {
+                    using (var graphics = Graphics.FromImage(_panFrame))
+                    {
+                        graphics.CopyFromScreen(
+                            cadPictBox.PointToScreen(Point.Empty),
+                            Point.Empty,
+                            cadPictBox.ClientSize);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"Unable to capture CAD preview from the screen for panning: {ex}");
+                    ClearPanFrame();
+                }
+            }
+
             currentXClickPosition = e.X;
             currentYClickPosition = e.Y;
+            panDeltaX = 0;
+            panDeltaY = 0;
             isMouseDown = true;
             cadPictBox.Cursor = Cursors.Hand;
             CursorUpdated?.Invoke(this, new CADImagingEventArgs(CADImagingEventArgs.EventType.Cursor, [Cursors.Hand]));
@@ -199,9 +176,7 @@ internal partial class CADImaging : IDisposable
             cadPictBox.Cursor = Cursors.Default;
             CursorUpdated?.Invoke(this, new CADImagingEventArgs(CADImagingEventArgs.EventType.Cursor, [Cursors.Default]));
 
-            _panDebounceTimer?.Stop();
-
-            _needsFullRedraw = true;
+            ClearPanFrame();
             SetPictureBoxPosition(position);
             cadPictBox.Invalidate();
         }
@@ -215,16 +190,6 @@ internal partial class CADImaging : IDisposable
         }
 
         ResetScaling();
-    }
-
-    private void OnPanDebounceTick(object sender, EventArgs e)
-    {
-        _panDebounceTimer?.Stop();
-        if (isMouseDown && cadImage != null && cadPictBox != null)
-        {
-            _needsFullRedraw = true;
-            cadPictBox.Invalidate();
-        }
     }
 
     private void OnCADPictBoxMouseMove(object sender, MouseEventArgs e)
@@ -246,9 +211,6 @@ internal partial class CADImaging : IDisposable
 
                 panDeltaX += dx;
                 panDeltaY += dy;
-
-                _panDebounceTimer?.Stop();
-                _panDebounceTimer?.Start();
 
                 cadPictBox.Invalidate();
             }
@@ -275,49 +237,19 @@ internal partial class CADImaging : IDisposable
         if (clientWidth <= 0 || clientHeight <= 0)
             return;
 
-        // Instant hardware/memory blit during panning: 60+ FPS, zero lag even on giant Civil 3D profiles
-        if (isMouseDown && _cachedRenderBitmap != null && !_needsFullRedraw)
+        if (isMouseDown && _panFrame != null)
         {
             using (var b = new SolidBrush(cadPictBox.BackColor))
             {
                 e.Graphics.FillRectangle(b, 0, 0, clientWidth, clientHeight);
             }
-            e.Graphics.DrawImageUnscaled(_cachedRenderBitmap, panDeltaX, panDeltaY);
+            e.Graphics.DrawImageUnscaled(_panFrame, panDeltaX, panDeltaY);
             return;
         }
 
         try
         {
-            if (_cachedRenderBitmap == null ||
-                _cachedRenderBitmap.Width != clientWidth ||
-                _cachedRenderBitmap.Height != clientHeight)
-            {
-                _cachedRenderBitmap?.Dispose();
-                _cachedRenderBitmap = new Bitmap(clientWidth, clientHeight);
-                _needsFullRedraw = true;
-            }
-
-            if (_needsFullRedraw)
-            {
-                using (var memG = Graphics.FromImage(_cachedRenderBitmap))
-                {
-                    using (var b = new SolidBrush(cadPictBox.BackColor))
-                    {
-                        memG.FillRectangle(b, 0, 0, clientWidth, clientHeight);
-                    }
-                    Shift();
-                    RectangleF tmp = ImageRectangleF;
-                    SetSizePictureBox(new Size((int)tmp.Width, (int)tmp.Height));
-                    SetPictureBoxPosition(position);
-                    cadImage.Draw(memG, tmp, cadPictBox);
-                }
-                _needsFullRedraw = false;
-                panDeltaX = 0;
-                panDeltaY = 0;
-            }
-
-            e.Graphics.DrawImageUnscaled(_cachedRenderBitmap, 0, 0);
-
+            DrawCADImage(e.Graphics);
             if (StatusUpdated != null)
                 StatusUpdated.Invoke(this, CADImagingEventArgs.NewStatusUpdatedEventArgs(RealScale));
         }
@@ -425,7 +357,6 @@ internal partial class CADImaging : IDisposable
         }
         LeftImagePosition = (cadPictBox.ClientRectangle.Width - visibleArea.Width) / 2f;
         TopImagePosition = (cadPictBox.ClientRectangle.Height - visibleArea.Height) / 2f;
-        _needsFullRedraw = true;
         cadPictBox.Invalidate();
     }
 
@@ -483,14 +414,11 @@ internal partial class CADImaging : IDisposable
         {
             imageScale = 0.005f;
         }
-        _needsFullRedraw = true;
         cadPictBox.Invalidate();
     }
 
     private void SetCADImageOptions()
     {
-        OptimizeImage(cadImage);
-
         CursorUpdated?.Invoke(this, CADImagingEventArgs.NewCursorUpdatedEventArgs(Cursors.Default));
 
         ObjEntity.cadImage = cadImage;
@@ -519,12 +447,10 @@ internal partial class CADImaging : IDisposable
 
         Resize();
         SetPictureBoxPosition(position);
-        _needsFullRedraw = true;
     }
 
     public void Invalidate()
     {
-        _needsFullRedraw = true;
         cadPictBox?.Invalidate();
     }
 }
