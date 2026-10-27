@@ -13,11 +13,15 @@ The following file extensions are treated as CAD files.
 - plt - Hewlett-Packard Graphics Language
 - cgm - Computer Graphics Metafile
 
+## Installation & Uninstallation
+
+See the detailed [Installation & Uninstallation Guide](INSTALLATION_GUIDE.md) for step-by-step instructions.
+
 ## Usage
 
-1. Scroll mouse wheel to zoom in/out.
-2. Double left click to reset the scaling.
-3. Right click and drag to pan the view.
+1. **Pan view**: Click and drag with **Left Mouse Button**, **Middle Mouse Button (Scroll Wheel)**, or **Right Mouse Button**.
+2. **Zoom**: Scroll mouse wheel forward / backward.
+3. **Reset scaling**: Double-click (Left or Middle mouse button).
 
 ## Licenses
 
