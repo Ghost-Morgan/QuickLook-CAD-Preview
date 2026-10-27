@@ -1,4 +1,4 @@
-﻿// Copyright © 2017-2025 QL-Win Contributors
+// Copyright © 2017-2025 QL-Win Contributors
 //
 // This file is part of QuickLook program.
 //
@@ -41,6 +41,7 @@ public class Plugin : IViewer
 
     public void Init()
     {
+        CADImaging.ConfigureGlobalSettings();
     }
 
     public bool CanHandle(string path)
@@ -59,19 +60,26 @@ public class Plugin : IViewer
 
         _rp = new RenderPanel();
         _rp.SetTheme(OSThemeHelper.AppsUseDarkTheme());
-        _rp.LoadCadFile(path);
 
         context.ViewerContent = _rp;
-        context.IsBusy = false;
+        context.IsBusy = true;
+
+        _rp.LoadCadFileAsync(path, () =>
+        {
+            context.IsBusy = false;
+        });
     }
 
     public void Cleanup()
     {
-        _width = _rp.ActualWidth;
-        _height = _rp.ActualHeight;
+        if (_rp != null)
+        {
+            _width = _rp.ActualWidth;
+            _height = _rp.ActualHeight;
 
-        _rp?.Dispose();
-        _rp = null;
+            _rp.Dispose();
+            _rp = null;
+        }
 
         GC.SuppressFinalize(this);
     }

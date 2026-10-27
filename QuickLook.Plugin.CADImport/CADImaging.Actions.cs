@@ -1,4 +1,4 @@
-﻿// Copyright © 2017-2025 QL-Win Contributors
+// Copyright © 2017-2025 QL-Win Contributors
 //
 // This file is part of QuickLook program.
 //
@@ -45,6 +45,8 @@ internal partial class CADImaging
 
     public void LoadFile(string fileName)
     {
+        ConfigureGlobalSettings();
+
         if (fileName != null)
         {
             if (cadImage != null)
@@ -63,6 +65,8 @@ internal partial class CADImaging
 
         if (cadImage != null)
         {
+            OptimizeImage(cadImage);
+
             if (CADConst.IsWebPath(fileName))
                 cadImage.LoadFromWeb(fileName);
             else
@@ -71,6 +75,31 @@ internal partial class CADImaging
         LastLoadedFilePath = fileName;
 
         SetCADImageOptions();
+        _needsFullRedraw = true;
+
+        AfterLoaded?.Invoke(this, fileName);
+    }
+
+    public void ApplyLoadedImage(CADImage loadedImage, string fileName)
+    {
+        if (loadedImage == null)
+            return;
+
+        if (cadImage != null)
+        {
+            cadImage.Dispose();
+            cadImage = null;
+        }
+
+        imageScale = 1f;
+        imageScalePrev = 1f;
+        position = new PointF();
+        cadImage = loadedImage;
+        LastLoadedFilePath = fileName;
+
+        SetCADImageOptions();
+        _needsFullRedraw = true;
+        cadPictBox?.Invalidate();
 
         AfterLoaded?.Invoke(this, fileName);
     }
@@ -81,6 +110,7 @@ internal partial class CADImaging
         imageScalePrev = 1f;
         LeftImagePosition = (cadPictBox.ClientRectangle.Width - visibleArea.Width) / 2f;
         TopImagePosition = (cadPictBox.ClientRectangle.Height - visibleArea.Height) / 2f;
+        _needsFullRedraw = true;
         cadPictBox.Invalidate();
     }
 
@@ -89,6 +119,8 @@ internal partial class CADImaging
         Zoom(1.3f);
         Shift();
         SetPictureBoxPosition(position);
+        _needsFullRedraw = true;
+        cadPictBox.Invalidate();
     }
 
     public void ZoomOut()
@@ -96,6 +128,8 @@ internal partial class CADImaging
         Zoom(0.7f);
         Shift();
         SetPictureBoxPosition(position);
+        _needsFullRedraw = true;
+        cadPictBox.Invalidate();
     }
 
     public void ZoomFit(float scaleRatio = 1f)
@@ -103,6 +137,8 @@ internal partial class CADImaging
         Zoom(scaleRatio);
         Shift();
         SetPictureBoxPosition(position);
+        _needsFullRedraw = true;
+        cadPictBox.Invalidate();
     }
 
     public void SetWhiteRender()
@@ -119,6 +155,7 @@ internal partial class CADImaging
         {
             clipRectangle.Color = Color.Black;
         }
+        _needsFullRedraw = true;
     }
 
     public void SetBlackRender()
@@ -135,6 +172,7 @@ internal partial class CADImaging
         {
             clipRectangle.Color = Color.White;
         }
+        _needsFullRedraw = true;
     }
 
     public void SetNormalColor()
@@ -145,6 +183,7 @@ internal partial class CADImaging
         }
 
         cadImage.DrawMode = CADDrawMode.Normal;
+        _needsFullRedraw = true;
         cadPictBox.Invalidate();
     }
 
@@ -156,13 +195,16 @@ internal partial class CADImaging
         }
 
         cadImage.DrawMode = CADDrawMode.Black;
+        _needsFullRedraw = true;
         cadPictBox.Invalidate();
     }
 
     public bool SetTextVisble(bool isTextVisible)
     {
         textVisible = isTextVisible;
-        cadImage.TextVisible = isTextVisible;
+        if (cadImage != null)
+            cadImage.TextVisible = isTextVisible;
+        _needsFullRedraw = true;
         cadPictBox.Invalidate();
         return textVisible;
     }
@@ -170,7 +212,9 @@ internal partial class CADImaging
     public bool InvertTextVisble()
     {
         textVisible = !textVisible;
-        cadImage.TextVisible = textVisible;
+        if (cadImage != null)
+            cadImage.TextVisible = textVisible;
+        _needsFullRedraw = true;
         cadPictBox.Invalidate();
         return textVisible;
     }

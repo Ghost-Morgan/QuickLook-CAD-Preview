@@ -1,4 +1,4 @@
-﻿// Copyright © 2017-2025 QL-Win Contributors
+// Copyright © 2017-2025 QL-Win Contributors
 //
 // This file is part of QuickLook program.
 //
@@ -62,6 +62,16 @@ internal partial class CADImaging
     private bool textVisible;
 
     private bool drawingColor;
+
+    private Bitmap _cachedRenderBitmap = null;
+
+    private bool _needsFullRedraw = true;
+
+    private int panDeltaX = 0;
+
+    private int panDeltaY = 0;
+
+    private Timer _panDebounceTimer = null;
 
     private float LeftImagePosition
     {
