@@ -1,6 +1,6 @@
 $releasePath = Join-Path $PSScriptRoot '..\Build\Release'
 $packagePath = Join-Path $PSScriptRoot '..\QuickLook.Plugin.CADImport.qlplugin'
-$temporaryZip = Join-Path $PSScriptRoot '..\QuickLook.Plugin.CADImport.zip'
+$temporaryZip = Join-Path $PSScriptRoot ("..\QuickLook.Plugin.CADImport.{0}.tmp.zip" -f [Guid]::NewGuid().ToString('N'))
 $files = @(
     (Join-Path $releasePath 'QuickLook.Plugin.CADImport.dll'),
     (Join-Path $releasePath 'QuickLook.Plugin.Metadata.config')
@@ -12,7 +12,12 @@ foreach ($file in $files) {
     }
 }
 
-Remove-Item -LiteralPath $packagePath -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath $temporaryZip -ErrorAction SilentlyContinue
-Compress-Archive -Path $files -DestinationPath $temporaryZip
-Move-Item -LiteralPath $temporaryZip -Destination $packagePath
+try {
+    Compress-Archive -Path $files -DestinationPath $temporaryZip
+    Move-Item -LiteralPath $temporaryZip -Destination $packagePath -Force
+}
+finally {
+    if (Test-Path -LiteralPath $temporaryZip) {
+        Remove-Item -LiteralPath $temporaryZip
+    }
+}

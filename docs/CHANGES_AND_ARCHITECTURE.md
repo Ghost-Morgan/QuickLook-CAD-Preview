@@ -25,12 +25,11 @@ not use or bundle the former commercial CADImport engine.
    reduced geometry sampling.
 6. Proxy mesh and shell geometry is used where a DWG contains it, including
    model transforms embedded in proxy graphics.
-7. Large drawings with embedded thumbnails show that image immediately. For
-   source files at least 2 MB, the plugin creates a 1600x1000 preview at low
-   priority and caches it under the user's local application data, with a
-   128 MB cache limit. A cached image is used on subsequent opens. No background
-   folder scanner is installed, so the first render starts after QuickLook
-   opens the file.
+7. DWG files with embedded thumbnails show that image immediately. The plugin
+   creates a 1920x1080 preview at low priority and caches it under the user's
+   local application data, with a 128 MB cache limit. A cached image is used
+   on subsequent opens. No background folder scanner is installed, so the
+   first render starts after QuickLook opens the file.
 
 ## Navigation
 
@@ -67,7 +66,7 @@ ACadSharp is restored from NuGet and its MIT license is recorded in
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File Scripts\update-version.ps1
-dotnet build QuickLook.Plugin.CADImport\QuickLook.Plugin.CADImport.csproj --configuration Release
+dotnet build QuickLook.Plugin.CADImport.sln --configuration Release
 powershell -ExecutionPolicy Bypass -File Scripts\pack-zip.ps1
 ```
 

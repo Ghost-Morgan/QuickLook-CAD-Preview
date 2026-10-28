@@ -19,6 +19,10 @@ namespace QuickLook.Plugin.CADImport;
 internal sealed class CadPreviewControl : Control
 {
     private const int MaxRenderDimension = 2048;
+    private const int HighResolutionPreviewWidth = 1920;
+    private const int HighResolutionPreviewHeight = 1080;
+    private const int ReducedTriangleLimit = 12000;
+    private const int ReducedPathLimit = 12000;
     private readonly Timer _renderTimer;
     private readonly Timer _qualityTimer;
     private CadScene _scene;
@@ -39,6 +43,12 @@ internal sealed class CadPreviewControl : Control
     private float _zoom = 1f;
     private float _panX;
     private float _panY;
+    private float _frameYaw;
+    private float _framePitch;
+    private float _frameTwist;
+    private float _frameZoom = 1f;
+    private float _framePanX;
+    private float _framePanY;
 
     public CadPreviewControl()
     {
@@ -49,10 +59,10 @@ internal sealed class CadPreviewControl : Control
             ControlStyles.UserPaint,
             true);
 
-        BackColor = Color.FromArgb(25, 28, 33);
+        BackColor = GetBackgroundColor(_isDark);
         Dock = DockStyle.Fill;
         TabStop = true;
-        _renderTimer = new Timer { Interval = 70 };
+        _renderTimer = new Timer { Interval = 25 };
         _renderTimer.Tick += (_, _) =>
         {
             _renderTimer.Stop();
@@ -132,7 +142,7 @@ internal sealed class CadPreviewControl : Control
     public void SetTheme(bool isDark)
     {
         _isDark = isDark;
-        BackColor = isDark ? Color.FromArgb(25, 28, 33) : Color.FromArgb(246, 247, 249);
+        BackColor = GetBackgroundColor(isDark);
         RequestRender();
         Invalidate();
     }
@@ -155,7 +165,23 @@ internal sealed class CadPreviewControl : Control
 
         if (_frame != null)
         {
-            e.Graphics.DrawImage(_frame, ClientRectangle);
+            if (_frameYaw == _yaw && _framePitch == _pitch && _frameTwist == _twist &&
+                (_frameZoom != _zoom || _framePanX != _panX || _framePanY != _panY))
+            {
+                float scale = _zoom / _frameZoom;
+                float width = ClientSize.Width * scale;
+                float height = ClientSize.Height * scale;
+                float x = ClientSize.Width / 2f + _panX -
+                          scale * (ClientSize.Width / 2f + _framePanX);
+                float y = ClientSize.Height / 2f + _panY -
+                          scale * (ClientSize.Height / 2f + _framePanY);
+                e.Graphics.InterpolationMode = InterpolationMode.HighQualityBilinear;
+                e.Graphics.DrawImage(_frame, new RectangleF(x, y, width, height));
+            }
+            else
+            {
+                e.Graphics.DrawImage(_frame, ClientRectangle);
+            }
         }
         else if (_thumbnail != null)
         {
@@ -215,6 +241,7 @@ internal sealed class CadPreviewControl : Control
             _panY += dy;
         }
 
+        Invalidate();
         RequestRender();
     }
 
@@ -242,6 +269,7 @@ internal sealed class CadPreviewControl : Control
         _reducedQualityPending = true;
         _qualityTimer.Stop();
         _qualityTimer.Start();
+        Invalidate();
         RequestRender();
     }
 
@@ -364,6 +392,12 @@ internal sealed class CadPreviewControl : Control
                     {
                         _frame?.Dispose();
                         _frame = renderedFrame;
+                        _frameYaw = yaw;
+                        _framePitch = pitch;
+                        _frameTwist = twist;
+                        _frameZoom = zoom;
+                        _framePanX = panX;
+                        _framePanY = panY;
                         _thumbnail?.Dispose();
                         _thumbnail = null;
                         _thumbnailIsHighResolution = false;
@@ -399,8 +433,8 @@ internal sealed class CadPreviewControl : Control
                 token.ThrowIfCancellationRequested();
                 using (Bitmap preview = RenderFrame(
                     scene,
-                    1600,
-                    1000,
+                    HighResolutionPreviewWidth,
+                    HighResolutionPreviewHeight,
                     isDark,
                     (float)scene.InitialYaw,
                     (float)scene.InitialPitch,
@@ -456,7 +490,7 @@ internal sealed class CadPreviewControl : Control
         bool reducedQuality,
         CancellationToken token)
     {
-        var background = isDark ? Color.FromArgb(25, 28, 33) : Color.FromArgb(246, 247, 249);
+        var background = GetBackgroundColor(isDark);
         var bitmap = new Bitmap(width, height, PixelFormat.Format32bppPArgb);
         using (Graphics graphics = Graphics.FromImage(bitmap))
         {
@@ -474,7 +508,9 @@ internal sealed class CadPreviewControl : Control
 
             var camera = new ProjectionCamera(center, yaw, pitch, twist, extent, width, height, zoom, panX, panY);
 
-            int triangleStride = reducedQuality ? Math.Max(1, scene.Triangles.Count / 40000) : 1;
+            int triangleStride = reducedQuality
+                ? Math.Max(1, (scene.Triangles.Count + ReducedTriangleLimit - 1) / ReducedTriangleLimit)
+                : 1;
             var projectedTriangles = new List<ProjectedTriangle>(
                 (scene.Triangles.Count + triangleStride - 1) / triangleStride);
             int rendered = 0;
@@ -503,7 +539,9 @@ internal sealed class CadPreviewControl : Control
                     graphics.FillPolygon(brush, [triangle.A.Point, triangle.B.Point, triangle.C.Point]);
             }
 
-            int pathStride = reducedQuality ? Math.Max(1, scene.Paths.Count / 40000) : 1;
+            int pathStride = reducedQuality
+                ? Math.Max(1, (scene.Paths.Count + ReducedPathLimit - 1) / ReducedPathLimit)
+                : 1;
             for (int pathIndex = 0; pathIndex < scene.Paths.Count; pathIndex += pathStride)
             {
                 if ((rendered++ & 2047) == 0)
@@ -630,6 +668,8 @@ internal sealed class CadPreviewControl : Control
             (ClientSize.Height - height) / 2,
             width,
             height);
+        graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+        graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
         graphics.DrawImage(_thumbnail, destination);
     }
 
@@ -651,6 +691,11 @@ internal sealed class CadPreviewControl : Control
     }
 
     private static bool IsFinite(double value) => !double.IsNaN(value) && !double.IsInfinity(value);
+
+    private static Color GetBackgroundColor(bool isDark)
+    {
+        return isDark ? Color.FromArgb(41, 41, 41) : Color.FromArgb(250, 250, 250);
+    }
 
     private static Color WithAlpha(Color color, int alpha)
     {

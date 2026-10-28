@@ -1,71 +1,104 @@
-![QuickLook icon](https://user-images.githubusercontent.com/1687847/29485863-8cd61b7c-84e2-11e7-97d5-eacc2ba10d28.png)
+<div align="center">
+
+<img src="https://user-images.githubusercontent.com/1687847/29485863-8cd61b7c-84e2-11e7-97d5-eacc2ba10d28.png" width="104" alt="QuickLook">
 
 # QuickLook CAD Preview
 
-An open-source [QuickLook](https://github.com/QL-Win/QuickLook) plugin for
-previewing DWG and DXF drawings. It uses the MIT-licensed ACadSharp reader and
-a project-owned 3D preview renderer. It does not depend on the commercial
-CADImport engine.
+**Fast, interactive DWG and DXF previews for QuickLook on Windows.**
 
-## Supported files
+[![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE-GPL.txt)
+![Platform: Windows](https://img.shields.io/badge/platform-Windows-0078D4.svg)
+![.NET Framework 4.6.2](https://img.shields.io/badge/.NET_Framework-4.6.2-512BD4.svg)
+![CAD formats: DWG and DXF](https://img.shields.io/badge/CAD-DWG%20%7C%20DXF-2E8B57.svg)
 
-- `.dwg` — AutoCAD drawing
-- `.dxf` — AutoCAD Drawing Exchange Format
+[Getting started](#getting-started) · [Features](#features) · [Build](#build-from-source) · [Documentation](#documentation)
 
-## Preview controls
+</div>
 
-- **Left-drag:** rotate the 3D view
-- **Right- or middle-drag:** pan
-- **Mouse wheel:** zoom toward the pointer
-- **Double-click** or press **R:** reset to the saved drawing view when available
+---
 
-DWG files show their embedded thumbnail immediately when available. For files
-larger than 2 MB, a higher-resolution preview is generated at low priority in
-the background and cached (up to 128 MB) for faster subsequent opens. The
-interactive model view is prepared independently. The cache is generated only
-after QuickLook first opens a drawing; the plugin does not run an always-on
-folder scanner.
-When extreme isolated coordinates dominate a large drawing's extents, the
-initial view fits the main geometry instead. Geometry is not removed, but
-outliers may lie outside the initial view.
+Preview technical drawings in [QuickLook](https://github.com/QL-Win/QuickLook)
+without opening a full CAD application. This project uses the open-source
+[ACadSharp](https://github.com/DomCR/ACadSharp) reader and its own 3D renderer;
+it does not require the former commercial CADImport engine.
 
-Text, multiline text, multileader labels, dimension graphics, and hatch
-boundaries are rendered where the DWG exposes their geometry. Profile ground
-lines and TIN surfaces can only be displayed when represented by supported
-CAD geometry or available proxy graphics; native Civil 3D surface data is not
-reconstructed. The preview currently renders model space rather than composing
-paper-space layout viewports.
+## Features
 
-## Civil 3D and compatibility
+| Interactive navigation | High-resolution previews | CAD-aware rendering |
+| --- | --- | --- |
+| Rotate, pan, and zoom the model directly in QuickLook. | Generate 1920 × 1080 cached previews for clear, readable drawings. | Preview common geometry, annotations, dimensions, hatch boundaries, and available proxy graphics. |
 
-Civil 3D drawings can contain application-specific objects. The plugin renders
-available proxy graphics and common CAD geometry, but it does not interpret
-Civil 3D surfaces, alignments, corridors, or profiles as native Civil 3D
-objects. Entity support and visual fidelity can differ from AutoCAD; external
-references, specialized fonts, and some paper-space settings may be missing.
-Large scenes are limited to 250,000 geometry elements to keep previews bounded.
+### Supported formats
 
-## Build and installation
+- **DWG** — embedded thumbnails are shown immediately when available.
+- **DXF** — model-space geometry is parsed and rendered.
 
-The current verification build is **1.0.0**. On Windows, initialize the
-QuickLook.Common source dependency and build the installable package from the
-repository root:
+### Preview controls
+
+| Action | Control |
+| --- | --- |
+| Rotate | Left-drag |
+| Pan | Right- or middle-drag |
+| Zoom toward pointer | Mouse wheel |
+| Reset to saved view | Double-click or press **R** |
+
+The renderer prepares the interactive view independently from the image
+preview. Larger cached previews are generated at low priority after opening a
+drawing and reused on later opens. The plugin does not scan folders in the
+background.
+
+> [!NOTE]
+> Civil 3D surfaces, alignments, corridors, and profiles are not reconstructed
+> as native objects. Available proxy graphics and supported CAD geometry can
+> be previewed; unsupported entities, external references, specialized fonts,
+> and paper-space plotting may differ from AutoCAD. Large scenes are bounded
+> to 250,000 geometry elements.
+
+## Getting started
+
+1. Install [QuickLook](https://github.com/QL-Win/QuickLook/releases).
+2. Obtain `QuickLook.Plugin.CADImport.qlplugin` from a project release or build
+   it from source.
+3. In File Explorer, select the `.qlplugin` file and press **Spacebar**.
+4. Confirm the QuickLook installation prompt.
+
+See the [installation guide](docs/INSTALLATION_GUIDE.md) for manual install,
+uninstall, and verification instructions.
+
+## Build from source
+
+On Windows, run from the repository root:
 
 ```powershell
 git submodule update --init --recursive
 .\Scripts\update-version.ps1
-dotnet build .\QuickLook.Plugin.CADImport.sln -c Release
+dotnet build .\QuickLook.Plugin.CADImport.sln --configuration Release
 .\Scripts\pack-zip.ps1
 ```
 
-The package is written to
-`QuickLook.Plugin.CADImport.qlplugin` in the repository root. Build output and
-the package are generated locally and are not source files. See
-[INSTALLATION_GUIDE.md](INSTALLATION_GUIDE.md) for installing the package.
-Architecture details and known limits are in
-[CHANGES_AND_ARCHITECTURE.md](CHANGES_AND_ARCHITECTURE.md).
+The installable `QuickLook.Plugin.CADImport.qlplugin` is generated at the
+repository root. Build outputs, editor settings, and the package are excluded
+from source control; attach the package to a GitHub Release when distributing
+it.
+
+## Documentation
+
+- [Installation and uninstallation](docs/INSTALLATION_GUIDE.md)
+- [Architecture and supported content](docs/CHANGES_AND_ARCHITECTURE.md)
+- [Third-party notices](docs/THIRD-PARTY-NOTICES.md)
+
+## Repository layout
+
+| Path | Contents |
+| --- | --- |
+| `src/QuickLook.Plugin.CADImport/` | Plugin source and project |
+| `src/QuickLook.Common/` | QuickLook.Common Git submodule |
+| `docs/` | Installation, architecture, and licensing documentation |
+| `Scripts/` | Versioning and package scripts |
+| `Build/` | Local build output (generated) |
 
 ## License
 
-Plugin source is GPL-3.0-or-later. Third-party dependencies and their licenses
-are listed in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+Plugin source is licensed under
+[GPL-3.0-or-later](LICENSE-GPL.txt). Third-party licenses are listed in the
+[notices](docs/THIRD-PARTY-NOTICES.md).

@@ -330,6 +330,9 @@ ASALocalRun/
 # MFractors (Xamarin productivity tool) working folder 
 .mfractor/
 /*.qlplugin
-/QuickLook.Plugin.CADImport/CADImaging.Module.cs
+/src/QuickLook.Plugin.CADImport/CADImaging.Module.cs
 /GitVersion.cs
 /QuickLook.Plugin.Metadata.config
+/.vscode/
+/QuickLook.Plugin.CADImport.zip
+/QuickLook.Plugin.CADImport.*.tmp.zip

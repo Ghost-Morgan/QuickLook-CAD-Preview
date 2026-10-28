@@ -10,7 +10,7 @@ plugin for [QuickLook](https://github.com/QL-Win/QuickLook).
 1. Ensure **QuickLook** is installed and running on your system.
    - [QuickLook from Microsoft Store](https://www.microsoft.com/store/apps/9nv4bs3l1h4s) or [GitHub Releases](https://github.com/QL-Win/QuickLook/releases).
 2. Obtain the plugin package from a project release, or build it from source
-   using the steps in [README.md](README.md#build-and-installation). The
+   using the steps in [README.md](../README.md#build-from-source). The
    package file is:
    - `QuickLook.Plugin.CADImport.qlplugin`
    - The plugin uses the open-source ACadSharp library. No paid CAD engine or
@@ -101,7 +101,7 @@ If you prefer to install manually or if one-click installation is unavailable:
 
 Civil 3D proxy geometry is previewed when it is available in the drawing.
 Native Civil 3D object interpretation is not supported; see
-[README.md](README.md#civil-3d-and-compatibility) for the current limits.
+[README.md](../README.md#features) for the current limits.
 
 ---
 

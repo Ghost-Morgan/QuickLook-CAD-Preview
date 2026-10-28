@@ -12,14 +12,14 @@ namespace QuickLook.Plugin.CADImport;
 
 internal static class CadPreviewCache
 {
-    private const long MinimumFileSize = 2 * 1024 * 1024;
     private const long MaximumCacheSize = 128 * 1024 * 1024;
+    private const string CacheVersion = "1080p";
 
     public static bool ShouldCache(string path)
     {
         try
         {
-            return new FileInfo(path).Length >= MinimumFileSize;
+            return File.Exists(path);
         }
         catch (IOException ex)
         {
@@ -39,7 +39,7 @@ internal static class CadPreviewCache
         string fullPath = source.FullName.ToUpperInvariant();
         string pathHash = Hash(fullPath);
         string theme = isDark ? "dark" : "light";
-        string filename = $"{pathHash}_{source.Length}_{source.LastWriteTimeUtc.Ticks}_{theme}.png";
+        string filename = $"{pathHash}_{source.Length}_{source.LastWriteTimeUtc.Ticks}_{theme}_{CacheVersion}.png";
         return Path.Combine(GetCacheDirectory(), filename);
     }
 

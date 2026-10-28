@@ -18,18 +18,18 @@
 
     <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
         <Optimize>false</Optimize>
-        <OutputPath>..\..\QuickLook\Build\Debug\QuickLook.Plugin\QuickLook.Plugin.CADImport</OutputPath>
+        <OutputPath>..\..\..\QuickLook\Build\Debug\QuickLook.Plugin\QuickLook.Plugin.CADImport</OutputPath>
         <DefineConstants>DEBUG;TRACE</DefineConstants>
     </PropertyGroup>
 
     <PropertyGroup Condition="'$(Configuration)' == 'Release'">
         <Optimize>true</Optimize>
-        <OutputPath>..\Build\Release\</OutputPath>
+        <OutputPath>..\..\Build\Release\</OutputPath>
         <DefineConstants>TRACE</DefineConstants>
     </PropertyGroup>
 
     <ItemGroup>
-        <None Include="..\QuickLook.Plugin.Metadata.Base.config">
+        <None Include="..\..\QuickLook.Plugin.Metadata.Base.config">
             <Link>QuickLook.Plugin.Metadata.config</Link>
             <TargetPath>QuickLook.Plugin.Metadata.config</TargetPath>
             <CopyToOutputDirectory>Always</CopyToOutputDirectory>
@@ -64,7 +64,7 @@
     </ItemGroup>
 
     <ItemGroup>
-        <Compile Include="..\GitVersion.cs">
+        <Compile Include="..\..\GitVersion.cs">
             <Link>Properties\GitVersion.cs</Link>
         </Compile>
     </ItemGroup>
