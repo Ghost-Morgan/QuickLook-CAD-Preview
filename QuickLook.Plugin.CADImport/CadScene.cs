@@ -1,6 +1,7 @@
 using ACadSharp;
 using ACadSharp.Entities;
 using ACadSharp.Entities.ProxyGraphics;
+using ACadSharp.Tables;
 using CSMath;
 using System;
 using System.Collections.Generic;
@@ -14,6 +15,12 @@ internal sealed class CadScene
 {
     public readonly List<CadPath> Paths = new();
     public readonly List<CadTriangle> Triangles = new();
+    public readonly List<CadText> Texts = new();
+    public double InitialYaw { get; private set; } = -0.75;
+    public double InitialPitch { get; private set; } = 0.62;
+    public double InitialTwist { get; private set; }
+    public CadPoint InitialCenter { get; private set; }
+    public double InitialExtent { get; private set; } = 1;
     public bool IsTruncated { get; set; }
     public int PrimitiveCount { get; set; }
     public bool HasBounds { get; private set; }
@@ -29,6 +36,126 @@ internal sealed class CadScene
     public double FitMaxX { get; private set; }
     public double FitMaxY { get; private set; }
     public double FitMaxZ { get; private set; }
+
+    public void SetInitialView(IEnumerable<VPort> viewports)
+    {
+        VPort bestViewport = null;
+        CadPoint bestCenter = default;
+        double bestDistance = double.PositiveInfinity;
+        foreach (VPort viewport in viewports)
+        {
+            double directionLength = Math.Sqrt(
+                viewport.Direction.X * viewport.Direction.X +
+                viewport.Direction.Y * viewport.Direction.Y +
+                viewport.Direction.Z * viewport.Direction.Z);
+            if (directionLength < 1e-12 ||
+                double.IsNaN(directionLength) || double.IsInfinity(directionLength))
+            {
+                continue;
+            }
+
+            CadPoint viewportCenter = GetViewportCenter(viewport);
+            double targetX = viewportCenter.X;
+            double targetY = viewportCenter.Y;
+            double targetZ = viewportCenter.Z;
+            if (double.IsNaN(targetX) || double.IsInfinity(targetX) ||
+                double.IsNaN(targetY) || double.IsInfinity(targetY) ||
+                double.IsNaN(targetZ) || double.IsInfinity(targetZ))
+            {
+                continue;
+            }
+
+            var candidateCenter = new CadPoint(targetX, targetY, targetZ);
+            double distance = DistanceToFitBounds(candidateCenter);
+            if (distance < bestDistance)
+            {
+                bestDistance = distance;
+                bestCenter = candidateCenter;
+                bestViewport = viewport;
+            }
+        }
+
+        if (bestViewport == null)
+            return;
+
+        SetInitialDirection(bestViewport);
+        double fitExtent = InitialExtent;
+        if (bestDistance <= Math.Max(1, fitExtent * 2) &&
+            bestViewport.ViewHeight > 1e-12 &&
+            !double.IsNaN(bestViewport.ViewHeight) &&
+            !double.IsInfinity(bestViewport.ViewHeight))
+        {
+            InitialCenter = bestCenter;
+            InitialExtent = Math.Max(fitExtent, bestViewport.ViewHeight);
+        }
+    }
+
+    private void SetInitialDirection(VPort viewport)
+    {
+        double x = viewport.Direction.X;
+        double y = viewport.Direction.Y;
+        double z = viewport.Direction.Z;
+        double length = Math.Sqrt(x * x + y * y + z * z);
+        if (length < 1e-12 || double.IsNaN(length) || double.IsInfinity(length))
+            return;
+
+        x /= length;
+        y /= length;
+        z /= length;
+        double horizontalLength = Math.Sqrt(x * x + y * y);
+        InitialYaw = horizontalLength < 1e-8 ? -Math.PI / 2 : Math.Atan2(y, x);
+        InitialPitch = Math.Asin(Math.Max(-1, Math.Min(1, z)));
+        if (!double.IsNaN(viewport.TwistAngle) && !double.IsInfinity(viewport.TwistAngle))
+            InitialTwist = viewport.TwistAngle;
+    }
+
+    private static CadPoint GetViewportCenter(VPort viewport)
+    {
+        double directionX = viewport.Direction.X;
+        double directionY = viewport.Direction.Y;
+        double directionZ = viewport.Direction.Z;
+        double directionLength = Math.Sqrt(
+            directionX * directionX + directionY * directionY + directionZ * directionZ);
+        directionX /= directionLength;
+        directionY /= directionLength;
+        directionZ /= directionLength;
+
+        double horizontalLength = Math.Sqrt(directionX * directionX + directionY * directionY);
+        double yaw = horizontalLength < 1e-8 ? -Math.PI / 2 : Math.Atan2(directionY, directionX);
+        double pitch = Math.Asin(Math.Max(-1, Math.Min(1, directionZ)));
+        double twist = double.IsNaN(viewport.TwistAngle) || double.IsInfinity(viewport.TwistAngle)
+            ? 0
+            : viewport.TwistAngle;
+
+        var right = new CadPoint(-Math.Sin(yaw), Math.Cos(yaw), 0);
+        var up = new CadPoint(
+            -Math.Sin(pitch) * Math.Cos(yaw),
+            -Math.Sin(pitch) * Math.Sin(yaw),
+            Math.Cos(pitch));
+        double cosine = Math.Cos(twist);
+        double sine = Math.Sin(twist);
+        var twistedRight = new CadPoint(
+            cosine * right.X - sine * up.X,
+            cosine * right.Y - sine * up.Y,
+            cosine * right.Z - sine * up.Z);
+        var twistedUp = new CadPoint(
+            sine * right.X + cosine * up.X,
+            sine * right.Y + cosine * up.Y,
+            sine * right.Z + cosine * up.Z);
+
+        return new CadPoint(
+            viewport.Target.X + twistedRight.X * viewport.Center.X + twistedUp.X * viewport.Center.Y,
+            viewport.Target.Y + twistedRight.Y * viewport.Center.X + twistedUp.Y * viewport.Center.Y,
+            viewport.Target.Z + twistedRight.Z * viewport.Center.X + twistedUp.Z * viewport.Center.Y);
+    }
+
+    private double DistanceToFitBounds(CadPoint point)
+    {
+        double dx = point.X < FitMinX ? FitMinX - point.X : point.X > FitMaxX ? point.X - FitMaxX : 0;
+        double dy = point.Y < FitMinY ? FitMinY - point.Y : point.Y > FitMaxY ? point.Y - FitMaxY : 0;
+        double dz = point.Z < FitMinZ ? FitMinZ - point.Z : point.Z > FitMaxZ ? point.Z - FitMaxZ : 0;
+        return Math.Sqrt(dx * dx + dy * dy + dz * dz);
+    }
 
     public void Include(CadPoint point)
     {
@@ -66,6 +193,7 @@ internal sealed class CadScene
         FitMaxX = MaxX;
         FitMaxY = MaxY;
         FitMaxZ = MaxZ;
+        SetFitCameraFrame();
 
         int geometryCount = Paths.Count + Triangles.Count;
         if (!HasBounds || geometryCount < 32)
@@ -143,6 +271,20 @@ internal sealed class CadScene
         (FitMinX, FitMaxX) = GetFitAxis(MinX, MaxX, minXBounds, maxXBounds, boundsCount, 0.05, 0.95);
         (FitMinY, FitMaxY) = GetFitAxis(MinY, MaxY, minYBounds, maxYBounds, boundsCount, 0.05, 0.95);
         (FitMinZ, FitMaxZ) = GetFitAxis(MinZ, MaxZ, minZBounds, maxZBounds, boundsCount, 0.01, 0.99);
+        SetFitCameraFrame();
+    }
+
+    private void SetFitCameraFrame()
+    {
+        InitialCenter = new CadPoint(
+            (FitMinX + FitMaxX) / 2,
+            (FitMinY + FitMaxY) / 2,
+            (FitMinZ + FitMaxZ) / 2);
+        InitialExtent = Math.Max(
+            Math.Max(FitMaxX - FitMinX, FitMaxY - FitMinY),
+            FitMaxZ - FitMinZ);
+        if (double.IsNaN(InitialExtent) || double.IsInfinity(InitialExtent) || InitialExtent <= 1e-12)
+            InitialExtent = 1;
     }
 
     private static (double min, double max) GetFitAxis(
@@ -182,6 +324,32 @@ internal sealed class CadPath
     {
         Points = points;
         IsClosed = isClosed;
+        Color = color;
+    }
+}
+
+internal sealed class CadText
+{
+    public string Value { get; }
+    public CadPoint Position { get; }
+    public CadPoint Horizontal { get; }
+    public CadPoint Vertical { get; }
+    public double Height { get; }
+    public int Color { get; }
+
+    public CadText(
+        string value,
+        CadPoint position,
+        CadPoint horizontal,
+        CadPoint vertical,
+        double height,
+        int color)
+    {
+        Value = value;
+        Position = position;
+        Horizontal = horizontal;
+        Vertical = vertical;
+        Height = height;
         Color = color;
     }
 }
@@ -239,6 +407,7 @@ internal struct CadPoint
 internal static class CadSceneBuilder
 {
     private const int MaxPrimitives = 250_000;
+    private const int MaxTextElements = 50_000;
     private const int MaxBlockDepth = 16;
 
     public static CadScene Build(CadDocument document, CancellationToken token)
@@ -247,6 +416,8 @@ internal static class CadSceneBuilder
         var blockPath = new HashSet<ulong>();
         AddEntities(scene, document.ModelSpace.Entities, blockPath, 0, token);
         scene.CalculateFitBounds(token);
+        scene.SetInitialView(document.VPorts.Where(viewport =>
+            string.Equals(viewport.Name, "*Active", StringComparison.OrdinalIgnoreCase)));
         return scene;
     }
 
@@ -290,6 +461,19 @@ internal static class CadSceneBuilder
             AddEntity(scene, entity, color);
             if (entity.HasProxyGeometries)
                 AddProxyGeometry(scene, entity.ProxyGeometries, color);
+
+            if (entity is Dimension dimension && blockDepth < MaxBlockDepth &&
+                dimension.Block != null && blockPath.Add(dimension.Block.Handle))
+            {
+                try
+                {
+                    AddEntities(scene, dimension.Block.Entities, blockPath, blockDepth + 1, token);
+                }
+                finally
+                {
+                    blockPath.Remove(dimension.Block.Handle);
+                }
+            }
         }
     }
 
@@ -330,14 +514,6 @@ internal static class CadSceneBuilder
         {
             AddEllipse(scene, ellipse, color);
         }
-        else if (entity is IPolyline polyline)
-        {
-            AddPath(
-                scene,
-                polyline.Vertices.Select(vertex => CadPoint.From(vertex.Location, polyline.Elevation)),
-                polyline.IsClosed,
-                color);
-        }
         else if (entity is Mesh mesh)
         {
             AddIndexedFaces(
@@ -360,6 +536,18 @@ internal static class CadSceneBuilder
                     [faceRecord.Index1, faceRecord.Index2, faceRecord.Index3, faceRecord.Index4], color, true);
             }
         }
+        else if (entity is PolygonMesh polygonMesh)
+        {
+            AddPolygonMesh(scene, polygonMesh, color);
+        }
+        else if (entity is IPolyline polyline)
+        {
+            AddPath(
+                scene,
+                polyline.Vertices.Select(vertex => CadPoint.From(vertex.Location, polyline.Elevation)),
+                polyline.IsClosed,
+                color);
+        }
         else if (entity is Circle circle)
         {
             AddCircle(scene, CadPoint.From(circle.Center), CadPoint.From(circle.Normal), circle.Radius, 0, Math.PI * 2, color);
@@ -368,6 +556,275 @@ internal static class CadSceneBuilder
         {
             var points = spline.FitPoints.Count > 1 ? spline.FitPoints : spline.ControlPoints;
             AddPath(scene, points.Select(point => CadPoint.From(point)), spline.IsClosed, color);
+        }
+        else if (entity is TextEntity text)
+        {
+            AddText(scene, text.Value, CadPoint.From(text.InsertPoint), CadPoint.From(text.Normal),
+                text.Rotation, text.Height, color);
+        }
+        else if (entity is MText mtext)
+        {
+            AddText(scene, mtext.PlainText, CadPoint.From(mtext.InsertPoint), CadPoint.From(mtext.Normal),
+                mtext.Rotation, mtext.Height, color);
+        }
+        else if (entity is MultiLeader multiLeader)
+        {
+            AddMultiLeader(scene, multiLeader, color);
+        }
+        else if (entity is Hatch hatch)
+        {
+            AddHatchBoundaries(scene, hatch, color);
+        }
+    }
+
+    private static void AddMultiLeader(CadScene scene, MultiLeader multiLeader, int color)
+    {
+        ACadSharp.Objects.MultiLeaderObjectContextData context = multiLeader.ContextData;
+        if (context == null)
+            return;
+
+        if (context.HasTextContents)
+        {
+            AddText(
+                scene,
+                context.TextLabel,
+                CadPoint.From(context.TextLocation),
+                CadPoint.From(context.TextNormal),
+                context.TextRotation,
+                context.TextHeight,
+                color);
+        }
+
+        if (context.LeaderRoots == null)
+            return;
+
+        foreach (ACadSharp.Objects.MultiLeaderObjectContextData.LeaderRoot root in context.LeaderRoots)
+        {
+            foreach (ACadSharp.Objects.MultiLeaderObjectContextData.LeaderLine line in root.Lines)
+            {
+                AddPath(scene, line.Points.Select(point => CadPoint.From(point)), false, color);
+                if (scene.IsTruncated)
+                    return;
+            }
+        }
+    }
+
+    private static void AddText(
+        CadScene scene,
+        string value,
+        CadPoint position,
+        CadPoint normal,
+        double rotation,
+        double height,
+        int color)
+    {
+        if (string.IsNullOrWhiteSpace(value) || !position.IsFinite || !normal.IsFinite ||
+            double.IsNaN(rotation) || double.IsInfinity(rotation) ||
+            double.IsNaN(height) || double.IsInfinity(height) || height <= 0 ||
+            scene.Texts.Count >= MaxTextElements)
+        {
+            return;
+        }
+
+        double normalLength = Math.Sqrt(
+            normal.X * normal.X + normal.Y * normal.Y + normal.Z * normal.Z);
+        CadPoint unitNormal = normalLength < 1e-12
+            ? new CadPoint(0, 0, 1)
+            : new CadPoint(normal.X / normalLength, normal.Y / normalLength, normal.Z / normalLength);
+        CadPoint axisX = Math.Abs(unitNormal.Z) > 0.9
+            ? new CadPoint(1, 0, 0)
+            : Normalize(new CadPoint(unitNormal.Y, -unitNormal.X, 0));
+        CadPoint axisY = Cross(unitNormal, axisX);
+        CadPoint horizontal = new CadPoint(
+            axisX.X * Math.Cos(rotation) + axisY.X * Math.Sin(rotation),
+            axisX.Y * Math.Cos(rotation) + axisY.Y * Math.Sin(rotation),
+            axisX.Z * Math.Cos(rotation) + axisY.Z * Math.Sin(rotation));
+        CadPoint vertical = Cross(unitNormal, horizontal);
+        if (value.Length > 2048)
+            value = value.Substring(0, 2048);
+
+        scene.Texts.Add(new CadText(value, position, horizontal, vertical, height, color));
+        scene.Include(position);
+    }
+
+    private static void AddHatchBoundaries(CadScene scene, Hatch hatch, int color)
+    {
+        foreach (Hatch.BoundaryPath boundary in hatch.Paths)
+        {
+            if (scene.IsTruncated)
+                return;
+
+            if (boundary.IsPolyline)
+            {
+                foreach (Hatch.BoundaryPath.Edge edge in boundary.Edges)
+                {
+                    if (edge is Hatch.BoundaryPath.Polyline polyline)
+                    {
+                        AddPath(
+                            scene,
+                            polyline.Vertices.Select(vertex => FromHatchCoordinates(hatch, vertex.X, vertex.Y)),
+                            polyline.IsClosed,
+                            color);
+                    }
+
+                    if (scene.IsTruncated)
+                        return;
+                }
+
+                continue;
+            }
+
+            foreach (Hatch.BoundaryPath.Edge edge in boundary.Edges)
+            {
+                switch (edge)
+                {
+                    case Hatch.BoundaryPath.Line line:
+                        AddPath(scene,
+                            [
+                                FromHatchCoordinates(hatch, line.Start.X, line.Start.Y),
+                                FromHatchCoordinates(hatch, line.End.X, line.End.Y),
+                            ],
+                            false,
+                            color);
+                        break;
+                    case Hatch.BoundaryPath.Arc arc:
+                        double sweep = arc.EndAngle - arc.StartAngle;
+                        if (arc.CounterClockWise && sweep < 0)
+                            sweep += Math.PI * 2;
+                        else if (!arc.CounterClockWise && sweep > 0)
+                            sweep -= Math.PI * 2;
+                        AddCircle(
+                            scene,
+                            FromHatchCoordinates(hatch, arc.Center.X, arc.Center.Y),
+                            CadPoint.From(hatch.Normal),
+                            arc.Radius,
+                            arc.StartAngle,
+                            sweep,
+                            color);
+                        break;
+                    case Hatch.BoundaryPath.Ellipse ellipse:
+                        AddHatchEllipse(scene, hatch, ellipse, color);
+                        break;
+                    case Hatch.BoundaryPath.Spline spline:
+                        var points = spline.FitPoints.Count > 1
+                            ? spline.FitPoints.Select(point => FromHatchCoordinates(hatch, point.X, point.Y))
+                            : spline.ControlPoints.Select(point => FromHatchCoordinates(hatch, point.X, point.Y));
+                        AddPath(scene, points, spline.IsPeriodic, color);
+                        break;
+                }
+
+                if (scene.IsTruncated)
+                    return;
+            }
+        }
+    }
+
+    private static void AddHatchEllipse(
+        CadScene scene,
+        Hatch hatch,
+        Hatch.BoundaryPath.Ellipse ellipse,
+        int color)
+    {
+        double sweep = ellipse.EndAngle - ellipse.StartAngle;
+        if (ellipse.CounterClockWise && sweep < 0)
+            sweep += Math.PI * 2;
+        else if (!ellipse.CounterClockWise && sweep > 0)
+            sweep -= Math.PI * 2;
+
+        int segments = Math.Max(16, Math.Min(128, (int)Math.Ceiling(Math.Abs(sweep) * 20)));
+        var points = new CadPoint[segments + 1];
+        double majorX = ellipse.MajorAxisEndPoint.X;
+        double majorY = ellipse.MajorAxisEndPoint.Y;
+        double majorLength = Math.Sqrt(majorX * majorX + majorY * majorY);
+        if (majorLength < 1e-12)
+            return;
+
+        double minorLength = majorLength * ellipse.RadiusRatio;
+        double axisX = majorX / majorLength;
+        double axisY = majorY / majorLength;
+        double centerX = ellipse.Center.X;
+        double centerY = ellipse.Center.Y;
+        for (int i = 0; i <= segments; i++)
+        {
+            double angle = ellipse.StartAngle + sweep * i / segments;
+            double cosine = Math.Cos(angle);
+            double sine = Math.Sin(angle);
+            points[i] = FromHatchCoordinates(
+                hatch,
+                centerX + majorX * cosine - axisY * minorLength * sine,
+                centerY + majorY * cosine + axisX * minorLength * sine);
+        }
+
+        AddPath(scene, points, Math.Abs(sweep) >= Math.PI * 2 - 1e-8, color);
+    }
+
+    private static CadPoint FromHatchCoordinates(Hatch hatch, double x, double y)
+    {
+        CadPoint normal = CadPoint.From(hatch.Normal);
+        double normalLength = Math.Sqrt(
+            normal.X * normal.X + normal.Y * normal.Y + normal.Z * normal.Z);
+        if (normalLength < 1e-12)
+            normal = new CadPoint(0, 0, 1);
+        else
+            normal = new CadPoint(
+                normal.X / normalLength,
+                normal.Y / normalLength,
+                normal.Z / normalLength);
+
+        CadPoint axisX = Math.Abs(normal.Z) > 0.9
+            ? new CadPoint(1, 0, 0)
+            : Normalize(new CadPoint(normal.Y, -normal.X, 0));
+        CadPoint axisY = Cross(normal, axisX);
+        return new CadPoint(
+            axisX.X * x + axisY.X * y + normal.X * hatch.Elevation,
+            axisX.Y * x + axisY.Y * y + normal.Y * hatch.Elevation,
+            axisX.Z * x + axisY.Z * y + normal.Z * hatch.Elevation);
+    }
+
+    private static void AddPolygonMesh(CadScene scene, PolygonMesh mesh, int color)
+    {
+        var vertices = mesh.Vertices
+            .Select(vertex => CadPoint.From(vertex.Location, mesh.Elevation))
+            .ToList();
+        int rows = mesh.MVertexCount;
+        int columns = mesh.NVertexCount;
+        if (rows < 2 || columns < 2 || rows * columns != vertices.Count)
+        {
+            AddPath(scene, vertices, mesh.IsClosed, color);
+            return;
+        }
+
+        for (int row = 0; row < rows; row++)
+        {
+            var rowPoints = new CadPoint[columns];
+            for (int column = 0; column < columns; column++)
+                rowPoints[column] = vertices[row * columns + column];
+            AddPath(scene, rowPoints, false, color);
+            if (scene.IsTruncated)
+                return;
+        }
+
+        for (int column = 0; column < columns; column++)
+        {
+            var columnPoints = new CadPoint[rows];
+            for (int row = 0; row < rows; row++)
+                columnPoints[row] = vertices[row * columns + column];
+            AddPath(scene, columnPoints, false, color);
+            if (scene.IsTruncated)
+                return;
+        }
+
+        for (int row = 0; row < rows - 1; row++)
+        {
+            for (int column = 0; column < columns - 1; column++)
+            {
+                int current = row * columns + column;
+                int nextRow = current + columns;
+                AddTriangle(scene, vertices[current], vertices[current + 1], vertices[nextRow], color);
+                AddTriangle(scene, vertices[current + 1], vertices[nextRow + 1], vertices[nextRow], color);
+                if (scene.IsTruncated)
+                    return;
+            }
         }
     }
 

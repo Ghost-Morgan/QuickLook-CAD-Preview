@@ -20,18 +20,22 @@ internal sealed class CadPreviewControl : Control
 {
     private const int MaxRenderDimension = 2048;
     private readonly Timer _renderTimer;
+    private readonly Timer _qualityTimer;
     private CadScene _scene;
     private Bitmap _frame;
     private Bitmap _thumbnail;
+    private bool _thumbnailIsHighResolution;
     private CancellationTokenSource _renderCancellation;
     private int _renderVersion;
     private bool _isDark = true;
     private bool _renderFailed;
     private bool _isDragging;
     private bool _isRotating;
+    private bool _reducedQualityPending;
     private DrawingPoint _lastMousePosition;
     private float _yaw = -0.75f;
     private float _pitch = 0.62f;
+    private float _twist;
     private float _zoom = 1f;
     private float _panX;
     private float _panY;
@@ -53,6 +57,13 @@ internal sealed class CadPreviewControl : Control
         {
             _renderTimer.Stop();
             RenderCurrentView();
+        };
+        _qualityTimer = new Timer { Interval = 240 };
+        _qualityTimer.Tick += (_, _) =>
+        {
+            _qualityTimer.Stop();
+            _reducedQualityPending = false;
+            RequestRender();
         };
     }
 
@@ -86,10 +97,22 @@ internal sealed class CadPreviewControl : Control
         }
     }
 
-    public void SetThumbnail(Bitmap thumbnail)
+    public bool IsDarkTheme => _isDark;
+
+    public void SetThumbnail(Bitmap thumbnail, bool isHighResolution = false)
     {
+        if (thumbnail == null)
+            return;
+
+        if (_thumbnailIsHighResolution && !isHighResolution)
+        {
+            thumbnail.Dispose();
+            return;
+        }
+
         _thumbnail?.Dispose();
         _thumbnail = thumbnail;
+        _thumbnailIsHighResolution = isHighResolution;
         Invalidate();
     }
 
@@ -97,8 +120,12 @@ internal sealed class CadPreviewControl : Control
     {
         _scene = scene;
         _renderFailed = false;
-        _thumbnail?.Dispose();
-        _thumbnail = null;
+        if (scene != null)
+        {
+            _yaw = (float)scene.InitialYaw;
+            _pitch = (float)scene.InitialPitch;
+            _twist = (float)scene.InitialTwist;
+        }
         RequestRender();
     }
 
@@ -133,7 +160,9 @@ internal sealed class CadPreviewControl : Control
         else if (_thumbnail != null)
         {
             DrawThumbnail(e.Graphics);
-            DrawCaption(e.Graphics, "Building the interactive model view...");
+            DrawCaption(e.Graphics, _renderFailed
+                ? "Interactive rendering failed; showing the raster preview."
+                : "Building the interactive model view...");
         }
         else
         {
@@ -146,7 +175,7 @@ internal sealed class CadPreviewControl : Control
         if (_scene?.IsTruncated == true)
             DrawCaption(e.Graphics, "Large drawing: preview is limited to the first 250,000 geometry elements.");
         else if (_scene != null && !_renderFailed)
-            DrawCaption(e.Graphics, "Drag to rotate  |  Right-drag to pan  |  Wheel to zoom  |  Double-click to fit");
+            DrawCaption(e.Graphics, "Drag to rotate  |  Right-drag to pan  |  Wheel to zoom  |  Double-click or R to reset");
 
         base.OnPaint(e);
     }
@@ -174,6 +203,7 @@ internal sealed class CadPreviewControl : Control
         int dy = e.Y - _lastMousePosition.Y;
         _lastMousePosition = e.Location;
 
+        _reducedQualityPending = true;
         if (_isRotating)
         {
             _yaw += dx * 0.01f;
@@ -192,6 +222,8 @@ internal sealed class CadPreviewControl : Control
     {
         base.OnMouseUp(e);
         _isDragging = false;
+        _reducedQualityPending = false;
+        _qualityTimer.Stop();
         Capture = false;
         RequestRender();
     }
@@ -199,7 +231,17 @@ internal sealed class CadPreviewControl : Control
     protected override void OnMouseWheel(MouseEventArgs e)
     {
         base.OnMouseWheel(e);
-        _zoom = Math.Max(0.02f, Math.Min(500f, _zoom * (e.Delta > 0 ? 1.2f : 1f / 1.2f)));
+        float oldZoom = _zoom;
+        float factor = (float)Math.Pow(1.2, e.Delta / 120d);
+        _zoom = Math.Max(0.02f, Math.Min(500f, _zoom * factor));
+        factor = _zoom / oldZoom;
+        _panX = e.X - ClientSize.Width / 2f -
+                (e.X - ClientSize.Width / 2f - _panX) * factor;
+        _panY = e.Y - ClientSize.Height / 2f -
+                (e.Y - ClientSize.Height / 2f - _panY) * factor;
+        _reducedQualityPending = true;
+        _qualityTimer.Stop();
+        _qualityTimer.Start();
         RequestRender();
     }
 
@@ -222,6 +264,8 @@ internal sealed class CadPreviewControl : Control
         {
             _renderTimer.Stop();
             _renderTimer.Dispose();
+            _qualityTimer.Stop();
+            _qualityTimer.Dispose();
             _renderCancellation?.Cancel();
             _renderCancellation?.Dispose();
             _frame?.Dispose();
@@ -235,6 +279,13 @@ internal sealed class CadPreviewControl : Control
     {
         _yaw = -0.75f;
         _pitch = 0.62f;
+        _twist = 0;
+        if (_scene != null)
+        {
+            _yaw = (float)_scene.InitialYaw;
+            _pitch = (float)_scene.InitialPitch;
+            _twist = (float)_scene.InitialTwist;
+        }
         _zoom = 1f;
         _panX = 0;
         _panY = 0;
@@ -268,11 +319,15 @@ internal sealed class CadPreviewControl : Control
         bool isDark = _isDark;
         float yaw = _yaw;
         float pitch = _pitch;
+        float twist = _twist;
         float zoom = _zoom;
         float panX = _panX;
         float panY = _panY;
+        bool reducedQuality = _isDragging || _reducedQualityPending;
 
-        Task.Run(() => RenderFrame(scene, width, height, isDark, yaw, pitch, zoom, panX, panY, token), token)
+        Task.Run(() => RenderFrame(
+                scene, width, height, isDark, yaw, pitch, twist, zoom, panX, panY, reducedQuality, token),
+            token)
             .ContinueWith(task =>
             {
                 if (task.IsCanceled)
@@ -309,12 +364,82 @@ internal sealed class CadPreviewControl : Control
                     {
                         _frame?.Dispose();
                         _frame = renderedFrame;
+                        _thumbnail?.Dispose();
+                        _thumbnail = null;
+                        _thumbnailIsHighResolution = false;
                         _renderFailed = false;
                     }
 
                     Invalidate();
                 }));
             }, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
+    }
+
+    public void CacheHighResolutionPreview(string sourcePath, CancellationToken token)
+    {
+        if (_scene == null || !_scene.HasBounds || !CadPreviewCache.ShouldCache(sourcePath))
+            return;
+
+        bool isDark = _isDark;
+        string cachePath = CadPreviewCache.GetCachePath(sourcePath, isDark);
+        if (File.Exists(cachePath))
+            return;
+
+        var scene = _scene;
+        Task.Run(async () =>
+        {
+            Thread currentThread = null;
+            ThreadPriority previousPriority = ThreadPriority.Normal;
+            try
+            {
+                await Task.Delay(1500, token).ConfigureAwait(false);
+                currentThread = Thread.CurrentThread;
+                previousPriority = currentThread.Priority;
+                currentThread.Priority = ThreadPriority.BelowNormal;
+                token.ThrowIfCancellationRequested();
+                using (Bitmap preview = RenderFrame(
+                    scene,
+                    1600,
+                    1000,
+                    isDark,
+                    (float)scene.InitialYaw,
+                    (float)scene.InitialPitch,
+                    (float)scene.InitialTwist,
+                    1,
+                    0,
+                    0,
+                    false,
+                    token))
+                {
+                    token.ThrowIfCancellationRequested();
+                    CadPreviewCache.Store(sourcePath, isDark, cachePath, preview);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (IOException ex)
+            {
+                Debug.WriteLine($"Unable to create cached CAD preview: {ex}");
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                Debug.WriteLine($"Unable to create cached CAD preview: {ex}");
+            }
+            catch (ExternalException ex)
+            {
+                Debug.WriteLine($"Unable to render cached CAD preview: {ex}");
+            }
+            catch (ArgumentException ex)
+            {
+                Debug.WriteLine($"Unable to render cached CAD preview: {ex}");
+            }
+            finally
+            {
+                if (currentThread != null)
+                    currentThread.Priority = previousPriority;
+            }
+        }, token);
     }
 
     private static Bitmap RenderFrame(
@@ -324,9 +449,11 @@ internal sealed class CadPreviewControl : Control
         bool isDark,
         float yaw,
         float pitch,
+        float twist,
         float zoom,
         float panX,
         float panY,
+        bool reducedQuality,
         CancellationToken token)
     {
         var background = isDark ? Color.FromArgb(25, 28, 33) : Color.FromArgb(246, 247, 249);
@@ -340,25 +467,23 @@ internal sealed class CadPreviewControl : Control
             if (!scene.HasBounds)
                 return bitmap;
 
-            var center = new CadPoint(
-                (scene.FitMinX + scene.FitMaxX) / 2,
-                (scene.FitMinY + scene.FitMaxY) / 2,
-                (scene.FitMinZ + scene.FitMaxZ) / 2);
-            double extent = Math.Max(
-                Math.Max(scene.FitMaxX - scene.FitMinX, scene.FitMaxY - scene.FitMinY),
-                scene.FitMaxZ - scene.FitMinZ);
+            CadPoint center = scene.InitialCenter;
+            double extent = scene.InitialExtent;
             if (!IsFinite(extent) || extent <= 1e-12)
                 extent = 1;
 
-            var camera = new ProjectionCamera(center, yaw, pitch, extent, width, height, zoom, panX, panY);
+            var camera = new ProjectionCamera(center, yaw, pitch, twist, extent, width, height, zoom, panX, panY);
 
-            var projectedTriangles = new List<ProjectedTriangle>(scene.Triangles.Count);
+            int triangleStride = reducedQuality ? Math.Max(1, scene.Triangles.Count / 40000) : 1;
+            var projectedTriangles = new List<ProjectedTriangle>(
+                (scene.Triangles.Count + triangleStride - 1) / triangleStride);
             int rendered = 0;
-            foreach (var triangle in scene.Triangles)
+            for (int i = 0; i < scene.Triangles.Count; i += triangleStride)
             {
                 if ((rendered++ & 2047) == 0)
                     token.ThrowIfCancellationRequested();
 
+                CadTriangle triangle = scene.Triangles[i];
                 var a = camera.Project(triangle.A);
                 var b = camera.Project(triangle.B);
                 var c = camera.Project(triangle.C);
@@ -378,12 +503,16 @@ internal sealed class CadPreviewControl : Control
                     graphics.FillPolygon(brush, [triangle.A.Point, triangle.B.Point, triangle.C.Point]);
             }
 
-            foreach (var path in scene.Paths)
+            int pathStride = reducedQuality ? Math.Max(1, scene.Paths.Count / 40000) : 1;
+            for (int pathIndex = 0; pathIndex < scene.Paths.Count; pathIndex += pathStride)
             {
                 if ((rendered++ & 2047) == 0)
                     token.ThrowIfCancellationRequested();
 
-                var projected = path.Points.Select(camera.Project).ToArray();
+                CadPath path = scene.Paths[pathIndex];
+                var projected = new ProjectedPoint[path.Points.Length];
+                for (int pointIndex = 0; pointIndex < path.Points.Length; pointIndex++)
+                    projected[pointIndex] = camera.Project(path.Points[pointIndex]);
                 if (projected.Length < 2 || projected.All(point => !point.IsVisible(width, height)))
                     continue;
 
@@ -399,9 +528,94 @@ internal sealed class CadPreviewControl : Control
                         graphics.DrawLine(pen, projected[projected.Length - 1].Point, projected[0].Point);
                 }
             }
+
+            DrawTexts(graphics, camera, scene.Texts, width, height, isDark, reducedQuality, token);
         }
 
         return bitmap;
+    }
+
+    private static void DrawTexts(
+        Graphics graphics,
+        ProjectionCamera camera,
+        IReadOnlyList<CadText> texts,
+        int width,
+        int height,
+        bool isDark,
+        bool reducedQuality,
+        CancellationToken token)
+    {
+        int stride = reducedQuality ? Math.Max(1, texts.Count / 5000) : 1;
+        for (int i = 0; i < texts.Count; i += stride)
+        {
+            if ((i & 255) == 0)
+                token.ThrowIfCancellationRequested();
+
+            CadText text = texts[i];
+            ProjectedPoint anchor = camera.Project(text.Position);
+            if (!anchor.IsVisible(width, height))
+                continue;
+
+            var horizontalPoint = camera.Project(new CadPoint(
+                text.Position.X + text.Horizontal.X,
+                text.Position.Y + text.Horizontal.Y,
+                text.Position.Z + text.Horizontal.Z));
+            var verticalPoint = camera.Project(new CadPoint(
+                text.Position.X + text.Vertical.X * text.Height,
+                text.Position.Y + text.Vertical.Y * text.Height,
+                text.Position.Z + text.Vertical.Z * text.Height));
+            if (!horizontalPoint.IsFinite || !verticalPoint.IsFinite)
+                continue;
+
+            double directionX = horizontalPoint.Point.X - anchor.Point.X;
+            double directionY = horizontalPoint.Point.Y - anchor.Point.Y;
+            if (double.IsNaN(directionX) || double.IsInfinity(directionX) ||
+                double.IsNaN(directionY) || double.IsInfinity(directionY))
+            {
+                continue;
+            }
+
+            double projectedHeight = Math.Sqrt(
+                Math.Pow(verticalPoint.Point.X - anchor.Point.X, 2) +
+                Math.Pow(verticalPoint.Point.Y - anchor.Point.Y, 2));
+            if (double.IsNaN(projectedHeight) || double.IsInfinity(projectedHeight))
+                continue;
+
+            float fontSize = (float)Math.Max(6, Math.Min(96, projectedHeight));
+            float angle = (float)(Math.Atan2(directionY, directionX) * 180 / Math.PI);
+            using (var font = new Font(
+                FontFamily.GenericSansSerif,
+                fontSize,
+                FontStyle.Regular,
+                GraphicsUnit.Pixel))
+            using (var brush = new SolidBrush(EnsureContrast(Color.FromArgb(text.Color), isDark)))
+            {
+                var state = graphics.Save();
+                graphics.TranslateTransform(anchor.Point.X, anchor.Point.Y);
+                graphics.RotateTransform(angle);
+                graphics.DrawString(
+                    FormatCadText(text.Value),
+                    font,
+                    brush,
+                    0,
+                    -fontSize,
+                    StringFormat.GenericTypographic);
+                graphics.Restore(state);
+            }
+        }
+    }
+
+    private static string FormatCadText(string value)
+    {
+        return value
+            .Replace("\\P", "\n")
+            .Replace("\\~", " ")
+            .Replace("%%d", "°")
+            .Replace("%%D", "°")
+            .Replace("%%p", "±")
+            .Replace("%%P", "±")
+            .Replace("%%c", "Ø")
+            .Replace("%%C", "Ø");
     }
 
     private void DrawThumbnail(Graphics graphics)
@@ -460,6 +674,8 @@ internal sealed class CadPreviewControl : Control
         private readonly double _cosYaw;
         private readonly double _sinPitch;
         private readonly double _cosPitch;
+        private readonly double _sinTwist;
+        private readonly double _cosTwist;
         private readonly double _scale;
         private readonly double _offsetX;
         private readonly double _offsetY;
@@ -468,6 +684,7 @@ internal sealed class CadPreviewControl : Control
             CadPoint center,
             double yaw,
             double pitch,
+            double twist,
             double extent,
             int width,
             int height,
@@ -480,6 +697,8 @@ internal sealed class CadPreviewControl : Control
             _cosYaw = Math.Cos(yaw);
             _sinPitch = Math.Sin(pitch);
             _cosPitch = Math.Cos(pitch);
+            _sinTwist = Math.Sin(twist);
+            _cosTwist = Math.Cos(twist);
             _scale = Math.Min(width, height) * 0.85 / extent * zoom;
             _offsetX = width / 2d + panX;
             _offsetY = height / 2d + panY;
@@ -497,8 +716,10 @@ internal sealed class CadPreviewControl : Control
             double depth = _cosPitch * _cosYaw * x +
                            _cosPitch * _sinYaw * y +
                            _sinPitch * z;
+            double twistedX = _cosTwist * screenX - _sinTwist * screenY;
+            double twistedY = _sinTwist * screenX + _cosTwist * screenY;
             return new ProjectedPoint(
-                new PointF((float)(_offsetX + screenX * _scale), (float)(_offsetY - screenY * _scale)),
+                new PointF((float)(_offsetX + twistedX * _scale), (float)(_offsetY - twistedY * _scale)),
                 depth);
         }
     }

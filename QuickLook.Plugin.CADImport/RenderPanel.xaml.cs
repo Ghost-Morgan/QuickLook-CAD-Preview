@@ -17,6 +17,7 @@
 
 using System;
 using System.Diagnostics;
+using System.Drawing;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -54,6 +55,7 @@ public partial class RenderPanel : UserControl, IDisposable
         _cts?.Dispose();
         _cts = new CancellationTokenSource();
         var token = _cts.Token;
+        bool isDark = previewControl?.IsDarkTheme ?? true;
         int readyNotified = 0;
         void NotifyReady()
         {
@@ -66,25 +68,44 @@ public partial class RenderPanel : UserControl, IDisposable
             if (token.IsCancellationRequested)
                 return (CadScene)null;
 
+            Bitmap cachedThumbnail = CadPreviewCache.TryLoad(path, isDark);
+            bool hasCachedThumbnail = cachedThumbnail != null;
+            if (cachedThumbnail != null)
+            {
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    if (token.IsCancellationRequested || previewControl == null)
+                        cachedThumbnail.Dispose();
+                    else
+                    {
+                        previewControl.SetThumbnail(cachedThumbnail, true);
+                        NotifyReady();
+                    }
+                }));
+            }
+
             CadScene scene;
             if (string.Equals(Path.GetExtension(path), ".dwg", StringComparison.OrdinalIgnoreCase))
             {
                 using (var reader = new ACadSharp.IO.DwgReader(path))
                 {
-                    var preview = reader.ReadPreview();
-                    var thumbnail = CadPreviewControl.DecodeEmbeddedPreview(preview);
-                    if (thumbnail != null)
+                    if (!hasCachedThumbnail)
                     {
-                        Dispatcher.BeginInvoke(new Action(() =>
+                        var preview = reader.ReadPreview();
+                        var thumbnail = CadPreviewControl.DecodeEmbeddedPreview(preview);
+                        if (thumbnail != null)
                         {
-                            if (token.IsCancellationRequested || previewControl == null)
-                                thumbnail.Dispose();
-                            else
+                            Dispatcher.BeginInvoke(new Action(() =>
                             {
-                                previewControl.SetThumbnail(thumbnail);
-                                NotifyReady();
-                            }
-                        }));
+                                if (token.IsCancellationRequested || previewControl == null)
+                                    thumbnail.Dispose();
+                                else
+                                {
+                                    previewControl.SetThumbnail(thumbnail);
+                                    NotifyReady();
+                                }
+                            }));
+                        }
                     }
 
                     if (token.IsCancellationRequested)
@@ -131,6 +152,7 @@ public partial class RenderPanel : UserControl, IDisposable
             try
             {
                 previewControl.SetScene(loadedScene);
+                previewControl.CacheHighResolutionPreview(path, token);
             }
             catch (Exception ex)
             {

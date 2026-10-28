@@ -16,14 +16,25 @@ CADImport engine.
 
 - **Left-drag:** rotate the 3D view
 - **Right- or middle-drag:** pan
-- **Mouse wheel:** zoom
-- **Double-click** or press **R:** reset to a fitted isometric view
+- **Mouse wheel:** zoom toward the pointer
+- **Double-click** or press **R:** reset to the saved drawing view when available
 
-For DWG files with an embedded thumbnail, the thumbnail appears while the
-interactive model view is prepared in the background.
+DWG files show their embedded thumbnail immediately when available. For files
+larger than 2 MB, a higher-resolution preview is generated at low priority in
+the background and cached (up to 128 MB) for faster subsequent opens. The
+interactive model view is prepared independently. The cache is generated only
+after QuickLook first opens a drawing; the plugin does not run an always-on
+folder scanner.
 When extreme isolated coordinates dominate a large drawing's extents, the
 initial view fits the main geometry instead. Geometry is not removed, but
 outliers may lie outside the initial view.
+
+Text, multiline text, multileader labels, dimension graphics, and hatch
+boundaries are rendered where the DWG exposes their geometry. Profile ground
+lines and TIN surfaces can only be displayed when represented by supported
+CAD geometry or available proxy graphics; native Civil 3D surface data is not
+reconstructed. The preview currently renders model space rather than composing
+paper-space layout viewports.
 
 ## Civil 3D and compatibility
 
