@@ -6,7 +6,7 @@
              d:DesignHeight="450"
              d:DesignWidth="800"
              mc:Ignorable="d">
-    <Grid x:Name="previewBackground" Background="#FFFAFAFA">
+    <Grid Background="#FF292929">
         <WindowsFormsHost Name="presenter" />
         <TextBlock x:Name="loadErrorMessage"
                    HorizontalAlignment="Center"

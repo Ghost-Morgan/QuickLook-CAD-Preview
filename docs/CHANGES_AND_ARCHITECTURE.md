@@ -22,14 +22,16 @@ not use or bundle the former commercial CADImport engine.
 5. The renderer projects the scene into a cached bitmap on a worker thread.
    Painting the cached frame keeps QuickLook responsive while the view is
    rotated, panned, or zoomed; view updates are coalesced, and drag renders use
-   reduced geometry sampling.
+   reduced geometry sampling. Large scenes remain in reduced-detail mode, with
+   a bounded number of projected path points, to keep navigation responsive.
 6. Proxy mesh and shell geometry is used where a DWG contains it, including
    model transforms embedded in proxy graphics.
 7. DWG files with embedded thumbnails show that image immediately. The plugin
-   creates a 1920x1080 preview at low priority and caches it under the user's
-   local application data, with a 128 MB cache limit. A cached image is used
-   on subsequent opens. No background folder scanner is installed, so the
-   first render starts after QuickLook opens the file.
+   creates a 1920x1080 preview at low priority for scenes within the interactive
+   rendering budget and caches it under the user's local application data, with
+   a 128 MB cache limit. A cached image is used on subsequent opens. No
+   background folder scanner is installed, so the first render starts after
+   QuickLook opens the file.
 
 ## Navigation
 

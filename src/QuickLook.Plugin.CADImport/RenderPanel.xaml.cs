@@ -189,10 +189,6 @@ public partial class RenderPanel : UserControl, IDisposable
 
     public void SetTheme(bool isDark)
     {
-        previewBackground.Background = new System.Windows.Media.SolidColorBrush(
-            isDark
-                ? System.Windows.Media.Color.FromRgb(41, 41, 41)
-                : System.Windows.Media.Color.FromRgb(250, 250, 250));
         previewControl?.SetTheme(isDark);
     }
 }

@@ -21,8 +21,12 @@ internal sealed class CadPreviewControl : Control
     private const int MaxRenderDimension = 2048;
     private const int HighResolutionPreviewWidth = 1920;
     private const int HighResolutionPreviewHeight = 1080;
-    private const int ReducedTriangleLimit = 12000;
-    private const int ReducedPathLimit = 12000;
+    private const int ReducedTriangleLimit = 3000;
+    private const int ReducedPathLimit = 6000;
+    private const int ReducedPathPointLimit = 30000;
+    private const int LargeScenePrimitiveThreshold = 20000;
+    private const int LargeSceneTextThreshold = 10000;
+    private static readonly Color PreviewBackgroundColor = Color.FromArgb(41, 41, 41);
     private readonly Timer _renderTimer;
     private readonly Timer _qualityTimer;
     private CadScene _scene;
@@ -60,7 +64,7 @@ internal sealed class CadPreviewControl : Control
             ControlStyles.UserPaint,
             true);
 
-        BackColor = GetBackgroundColor(_isDark);
+        BackColor = PreviewBackgroundColor;
         Dock = DockStyle.Fill;
         TabStop = true;
         _renderTimer = new Timer { Interval = 60 };
@@ -157,7 +161,7 @@ internal sealed class CadPreviewControl : Control
     {
         _scene = scene;
         _renderFailed = false;
-        _useReducedInitialRender = scene != null && scene.PrimitiveCount > 20000;
+        _useReducedInitialRender = scene != null;
         if (scene != null)
         {
             _yaw = (float)scene.InitialYaw;
@@ -170,7 +174,6 @@ internal sealed class CadPreviewControl : Control
     public void SetTheme(bool isDark)
     {
         _isDark = isDark;
-        BackColor = GetBackgroundColor(isDark);
         RequestRender();
         Invalidate();
     }
@@ -203,7 +206,9 @@ internal sealed class CadPreviewControl : Control
                           scale * (ClientSize.Width / 2f + _framePanX);
                 float y = ClientSize.Height / 2f + _panY -
                           scale * (ClientSize.Height / 2f + _framePanY);
-                e.Graphics.InterpolationMode = InterpolationMode.HighQualityBilinear;
+                e.Graphics.InterpolationMode = _isDragging || _reducedQualityPending
+                    ? InterpolationMode.NearestNeighbor
+                    : InterpolationMode.HighQualityBilinear;
                 e.Graphics.DrawImage(_frame, new RectangleF(x, y, width, height));
             }
             else
@@ -228,6 +233,8 @@ internal sealed class CadPreviewControl : Control
 
         if (_scene?.IsTruncated == true)
             DrawCaption(e.Graphics, "Large drawing: preview is limited to the first 250,000 geometry elements.");
+        else if (_scene != null && RequiresReducedQuality(_scene))
+            DrawCaption(e.Graphics, "Large drawing: reduced-detail mode keeps navigation responsive.");
         else if (_scene != null && !_renderFailed)
             DrawCaption(e.Graphics, "Drag to rotate  |  Right-drag to pan  |  Wheel to zoom  |  Double-click or R to reset");
 
@@ -379,7 +386,8 @@ internal sealed class CadPreviewControl : Control
         float zoom = _zoom;
         float panX = _panX;
         float panY = _panY;
-        bool reducedQuality = _isDragging || _reducedQualityPending || _useReducedInitialRender;
+        bool reducedQuality = _isDragging || _reducedQualityPending ||
+                              _useReducedInitialRender || RequiresReducedQuality(scene);
         bool initialReducedQuality = _useReducedInitialRender;
 
         Task.Run(() => RenderFrame(
@@ -448,7 +456,8 @@ internal sealed class CadPreviewControl : Control
 
     public void CacheHighResolutionPreview(string sourcePath, CancellationToken token)
     {
-        if (_scene == null || !_scene.HasBounds || !CadPreviewCache.ShouldCache(sourcePath))
+        if (_scene == null || !_scene.HasBounds || RequiresReducedQuality(_scene) ||
+            !CadPreviewCache.ShouldCache(sourcePath))
             return;
 
         bool isDark = _isDark;
@@ -527,11 +536,10 @@ internal sealed class CadPreviewControl : Control
         bool reducedQuality,
         CancellationToken token)
     {
-        var background = GetBackgroundColor(isDark);
         var bitmap = new Bitmap(width, height, PixelFormat.Format32bppPArgb);
         using (Graphics graphics = Graphics.FromImage(bitmap))
         {
-            graphics.Clear(background);
+            graphics.Clear(PreviewBackgroundColor);
             graphics.SmoothingMode = SmoothingMode.AntiAlias;
             graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
 
@@ -586,7 +594,7 @@ internal sealed class CadPreviewControl : Control
                 ? Math.Max(1, (scene.Paths.Count + ReducedPathLimit - 1) / ReducedPathLimit)
                 : 1;
             DrawPaths(
-                graphics, camera, scene.Paths, pathStride, width, height, isDark, token);
+                graphics, camera, scene.Paths, pathStride, width, height, isDark, reducedQuality, token);
 
             DrawTexts(graphics, camera, scene.Texts, width, height, isDark, reducedQuality, token);
         }
@@ -602,11 +610,19 @@ internal sealed class CadPreviewControl : Control
         int width,
         int height,
         bool isDark,
+        bool reducedQuality,
         CancellationToken token)
     {
         var pathsByColor = new Dictionary<int, GraphicsPath>();
         try
         {
+            long totalPointCount = 0;
+            foreach (CadPath path in paths)
+                totalPointCount += path.Points.Length;
+            int pointStride = reducedQuality
+                ? (int)Math.Max(1L, (totalPointCount + ReducedPathPointLimit - 1) / ReducedPathPointLimit)
+                : 1;
+
             int rendered = 0;
             for (int pathIndex = 0; pathIndex < paths.Count; pathIndex += stride)
             {
@@ -617,17 +633,28 @@ internal sealed class CadPreviewControl : Control
                 if (path.Points.Length < 2)
                     continue;
 
-                var projected = new ProjectedPoint[path.Points.Length];
+                int projectedCount = (path.Points.Length + pointStride - 1) / pointStride;
+                bool includeLastPoint = (path.Points.Length - 1) % pointStride != 0;
+                if (includeLastPoint)
+                    projectedCount++;
+                var projected = new ProjectedPoint[projectedCount];
                 bool hasVisiblePoint = false;
-                for (int pointIndex = 0; pointIndex < path.Points.Length; pointIndex++)
+                int projectedIndex = 0;
+                for (int pointIndex = 0; pointIndex < path.Points.Length; pointIndex += pointStride)
                 {
                     if ((pointIndex & 2047) == 0)
                         token.ThrowIfCancellationRequested();
 
-                    projected[pointIndex] = camera.Project(path.Points[pointIndex]);
-                    hasVisiblePoint |= projected[pointIndex].IsVisible(width, height);
+                    projected[projectedIndex] = camera.Project(path.Points[pointIndex]);
+                    hasVisiblePoint |= projected[projectedIndex].IsVisible(width, height);
+                    projectedIndex++;
                 }
 
+                if (includeLastPoint)
+                {
+                    projected[projectedIndex] = camera.Project(path.Points[path.Points.Length - 1]);
+                    hasVisiblePoint |= projected[projectedIndex].IsVisible(width, height);
+                }
                 if (!hasVisiblePoint)
                     continue;
 
@@ -656,11 +683,19 @@ internal sealed class CadPreviewControl : Control
                     graphics.DrawPath(pen, entry.Value);
             }
         }
+
         finally
         {
             foreach (GraphicsPath path in pathsByColor.Values)
                 path.Dispose();
         }
+    }
+
+    private static bool RequiresReducedQuality(CadScene scene)
+    {
+        return scene.IsTruncated ||
+               scene.PrimitiveCount > LargeScenePrimitiveThreshold ||
+               scene.Texts.Count > LargeSceneTextThreshold;
     }
 
     private static void DrawTexts(
@@ -751,8 +786,6 @@ internal sealed class CadPreviewControl : Control
         float scale = Math.Min(
             (float)ClientSize.Width / _thumbnail.Width,
             (float)ClientSize.Height / _thumbnail.Height);
-        if (!_thumbnailIsHighResolution)
-            scale = Math.Min(1, scale);
         int width = Math.Max(1, (int)(_thumbnail.Width * scale));
         int height = Math.Max(1, (int)(_thumbnail.Height * scale));
         var destination = new Rectangle(
@@ -760,7 +793,9 @@ internal sealed class CadPreviewControl : Control
             (ClientSize.Height - height) / 2,
             width,
             height);
-        graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+        graphics.InterpolationMode = _thumbnailIsHighResolution
+            ? InterpolationMode.HighQualityBicubic
+            : InterpolationMode.NearestNeighbor;
         graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
         graphics.DrawImage(_thumbnail, destination);
     }
@@ -783,11 +818,6 @@ internal sealed class CadPreviewControl : Control
     }
 
     private static bool IsFinite(double value) => !double.IsNaN(value) && !double.IsInfinity(value);
-
-    private static Color GetBackgroundColor(bool isDark)
-    {
-        return isDark ? Color.FromArgb(41, 41, 41) : Color.FromArgb(250, 250, 250);
-    }
 
     private static Color WithAlpha(Color color, int alpha)
     {

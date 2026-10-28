@@ -13,7 +13,7 @@ namespace QuickLook.Plugin.CADImport;
 internal static class CadPreviewCache
 {
     private const long MaximumCacheSize = 128 * 1024 * 1024;
-    private const string CacheVersion = "1080p";
+    private const string CacheVersion = "1080p-bg292929";
 
     public static bool ShouldCache(string path)
     {
