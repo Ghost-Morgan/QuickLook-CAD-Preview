@@ -24,6 +24,11 @@ internal sealed class CadPreviewControl : Control
     private const int ReducedTriangleLimit = 3000;
     private const int ReducedPathLimit = 6000;
     private const int ReducedPathPointLimit = 30000;
+    private const int DetailedTriangleLimit = 50000;
+    private const int DetailedPathLimit = 60000;
+    private const int DetailedPathPointLimit = 300000;
+    private const int ReducedTextLimit = 5000;
+    private const int DetailedTextLimit = 15000;
     private const int LargeScenePrimitiveThreshold = 20000;
     private const int LargeSceneTextThreshold = 10000;
     private static readonly Color PreviewBackgroundColor = Color.FromArgb(41, 41, 41);
@@ -37,6 +42,7 @@ internal sealed class CadPreviewControl : Control
     private int _renderVersion;
     private bool _isDark = true;
     private bool _renderFailed;
+    private bool _hasDetailedFrame;
     private bool _useReducedInitialRender;
     private bool _isDragging;
     private bool _isRotating;
@@ -161,6 +167,7 @@ internal sealed class CadPreviewControl : Control
     {
         _scene = scene;
         _renderFailed = false;
+        _hasDetailedFrame = false;
         _useReducedInitialRender = scene != null;
         if (scene != null)
         {
@@ -232,10 +239,13 @@ internal sealed class CadPreviewControl : Control
         }
 
         if (_scene?.IsTruncated == true)
-            DrawCaption(e.Graphics, "Large drawing: preview is limited to the first 250,000 geometry elements.");
+            DrawCaption(e.Graphics, "Large drawing: preview is limited to the first 250,000 geometry elements.", true);
         else if (_scene != null && RequiresReducedQuality(_scene))
-            DrawCaption(e.Graphics, "Large drawing: reduced-detail mode keeps navigation responsive.");
-        else if (_scene != null && !_renderFailed)
+            DrawCaption(e.Graphics, _hasDetailedFrame
+                ? "Large drawing: higher-detail view."
+                : "Large drawing: rendering more detail after navigation.", true);
+
+        if (_scene != null && !_renderFailed)
             DrawCaption(e.Graphics, "Drag to rotate  |  Right-drag to pan  |  Wheel to zoom  |  Double-click or R to reset");
 
         base.OnPaint(e);
@@ -265,6 +275,7 @@ internal sealed class CadPreviewControl : Control
         _lastMousePosition = e.Location;
 
         _reducedQualityPending = true;
+        _hasDetailedFrame = false;
         if (_isRotating)
         {
             _yaw += dx * 0.01f;
@@ -302,6 +313,7 @@ internal sealed class CadPreviewControl : Control
         _panY = e.Y - ClientSize.Height / 2f -
                 (e.Y - ClientSize.Height / 2f - _panY) * factor;
         _reducedQualityPending = true;
+        _hasDetailedFrame = false;
         _qualityTimer.Stop();
         _qualityTimer.Start();
         Invalidate();
@@ -387,7 +399,7 @@ internal sealed class CadPreviewControl : Control
         float panX = _panX;
         float panY = _panY;
         bool reducedQuality = _isDragging || _reducedQualityPending ||
-                              _useReducedInitialRender || RequiresReducedQuality(scene);
+                              _useReducedInitialRender;
         bool initialReducedQuality = _useReducedInitialRender;
 
         Task.Run(() => RenderFrame(
@@ -437,6 +449,7 @@ internal sealed class CadPreviewControl : Control
                         _frameZoom = zoom;
                         _framePanX = panX;
                         _framePanY = panY;
+                        _hasDetailedFrame = !reducedQuality;
                         _thumbnail?.Dispose();
                         _thumbnail = null;
                         _thumbnailIsHighResolution = false;
@@ -552,10 +565,13 @@ internal sealed class CadPreviewControl : Control
                 extent = 1;
 
             var camera = new ProjectionCamera(center, yaw, pitch, twist, extent, width, height, zoom, panX, panY);
+            bool boundedScene = RequiresReducedQuality(scene);
 
-            int triangleStride = reducedQuality
-                ? Math.Max(1, (scene.Triangles.Count + ReducedTriangleLimit - 1) / ReducedTriangleLimit)
-                : 1;
+            int triangleLimit = reducedQuality
+                ? ReducedTriangleLimit
+                : boundedScene ? DetailedTriangleLimit : scene.Triangles.Count;
+            triangleLimit = Math.Max(1, triangleLimit);
+            int triangleStride = Math.Max(1, (scene.Triangles.Count + triangleLimit - 1) / triangleLimit);
             var projectedTriangles = new List<ProjectedTriangle>(
                 (scene.Triangles.Count + triangleStride - 1) / triangleStride);
             int rendered = 0;
@@ -590,13 +606,25 @@ internal sealed class CadPreviewControl : Control
                     graphics.FillPolygon(brush, [triangle.A.Point, triangle.B.Point, triangle.C.Point]);
             }
 
-            int pathStride = reducedQuality
-                ? Math.Max(1, (scene.Paths.Count + ReducedPathLimit - 1) / ReducedPathLimit)
-                : 1;
+            int pathLimit = reducedQuality
+                ? ReducedPathLimit
+                : boundedScene ? DetailedPathLimit : scene.Paths.Count;
+            pathLimit = Math.Max(1, pathLimit);
+            int pathStride = Math.Max(1, (scene.Paths.Count + pathLimit - 1) / pathLimit);
             DrawPaths(
-                graphics, camera, scene.Paths, pathStride, width, height, isDark, reducedQuality, token);
+                graphics, camera, scene.Paths, pathStride, width, height, isDark,
+                reducedQuality ? ReducedPathPointLimit :
+                    boundedScene ? DetailedPathPointLimit : int.MaxValue,
+                token);
 
-            DrawTexts(graphics, camera, scene.Texts, width, height, isDark, reducedQuality, token);
+            int textLimit = reducedQuality
+                ? ReducedTextLimit
+                : boundedScene ? DetailedTextLimit : scene.Texts.Count;
+            textLimit = Math.Max(1, textLimit);
+            DrawTexts(
+                graphics, camera, scene.Texts, width, height, isDark,
+                (scene.Texts.Count + textLimit - 1) / textLimit,
+                token);
         }
 
         return bitmap;
@@ -610,7 +638,7 @@ internal sealed class CadPreviewControl : Control
         int width,
         int height,
         bool isDark,
-        bool reducedQuality,
+        int pointLimit,
         CancellationToken token)
     {
         var pathsByColor = new Dictionary<int, GraphicsPath>();
@@ -619,9 +647,7 @@ internal sealed class CadPreviewControl : Control
             long totalPointCount = 0;
             foreach (CadPath path in paths)
                 totalPointCount += path.Points.Length;
-            int pointStride = reducedQuality
-                ? (int)Math.Max(1L, (totalPointCount + ReducedPathPointLimit - 1) / ReducedPathPointLimit)
-                : 1;
+            int pointStride = (int)Math.Max(1L, (totalPointCount + pointLimit - 1) / pointLimit);
 
             int rendered = 0;
             for (int pathIndex = 0; pathIndex < paths.Count; pathIndex += stride)
@@ -705,10 +731,9 @@ internal sealed class CadPreviewControl : Control
         int width,
         int height,
         bool isDark,
-        bool reducedQuality,
+        int stride,
         CancellationToken token)
     {
-        int stride = reducedQuality ? Math.Max(1, texts.Count / 5000) : 1;
         for (int i = 0; i < texts.Count; i += stride)
         {
             if ((i & 255) == 0)
@@ -800,7 +825,7 @@ internal sealed class CadPreviewControl : Control
         graphics.DrawImage(_thumbnail, destination);
     }
 
-    private void DrawCaption(Graphics graphics, string text)
+    private void DrawCaption(Graphics graphics, string text, bool atTop = false)
     {
         using (var brush = new SolidBrush(_isDark ? Color.FromArgb(220, 230, 240) : Color.FromArgb(35, 40, 48)))
         using (var background = new SolidBrush(_isDark ? Color.FromArgb(200, 20, 23, 28) : Color.FromArgb(220, 255, 255, 255)))
@@ -809,7 +834,7 @@ internal sealed class CadPreviewControl : Control
             SizeF size = graphics.MeasureString(text, font);
             var rectangle = new RectangleF(
                 Math.Max(8, (ClientSize.Width - size.Width - 20) / 2),
-                Math.Max(8, ClientSize.Height - size.Height - 20),
+                atTop ? 8 : Math.Max(8, ClientSize.Height - size.Height - 20),
                 size.Width + 20,
                 size.Height + 12);
             graphics.FillRectangle(background, rectangle);
