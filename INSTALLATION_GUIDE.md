@@ -1,6 +1,7 @@
-# QuickLook CADImport Plugin - Installation & Uninstallation Guide
+# QuickLook CAD Preview - Installation & Uninstallation Guide
 
-This guide provides step-by-step instructions for installing and uninstalling the **QuickLook.Plugin.CADImport** plugin for [QuickLook](https://github.com/QL-Win/QuickLook).
+This guide covers installing and uninstalling the **QuickLook CAD Preview**
+plugin for [QuickLook](https://github.com/QL-Win/QuickLook).
 
 ---
 
@@ -10,6 +11,8 @@ This guide provides step-by-step instructions for installing and uninstalling th
    - [QuickLook from Microsoft Store](https://www.microsoft.com/store/apps/9nv4bs3l1h4s) or [GitHub Releases](https://github.com/QL-Win/QuickLook/releases).
 2. Download or build the plugin file:
    - `QuickLook.Plugin.CADImport.qlplugin`
+   - The plugin uses the open-source ACadSharp library. No paid CAD engine or
+     separate CAD application is required.
 
 ---
 
@@ -88,9 +91,15 @@ If you prefer to install manually or if one-click installation is unavailable:
 
 ## How to Verify It Works
 
-1. In Windows File Explorer, highlight any `.dwg`, `.dxf`, `.plt`, or `.cgm` CAD file (including heavy Civil 3D drawings with surface profiles and contour terrain).
+1. In Windows File Explorer, highlight a `.dwg` or `.dxf` drawing.
 2. Press the **Spacebar**.
-3. The preview will immediately appear with full responsiveness.
+3. If the DWG contains an embedded thumbnail, it appears while the interactive
+   3D preview is prepared. Otherwise, the plugin shows the model after it is
+   read and rendered.
+
+Civil 3D proxy geometry is previewed when it is available in the drawing.
+Native Civil 3D object interpretation is not supported; see
+[README.md](README.md#civil-3d-and-compatibility) for the current limits.
 
 ---
 
@@ -98,7 +107,8 @@ If you prefer to install manually or if one-click installation is unavailable:
 
 | Action | Control |
 | :--- | :--- |
-| **Pan View** | Click & drag with **Left Mouse Button**, **Middle Mouse Button (Scroll Wheel)**, or **Right Mouse Button** |
+| **Rotate 3D view** | Left-click and drag |
+| **Pan View** | Right- or middle-click and drag |
 | **Zoom In / Out** | Scroll mouse wheel forward / backward |
-| **Reset View / Fit to Screen** | **Double-click** (Left or Middle mouse button) |
+| **Reset View / Fit to Screen** | **Double-click** or press **R** |
 | **Close Preview** | Press **Spacebar** or **Esc** |

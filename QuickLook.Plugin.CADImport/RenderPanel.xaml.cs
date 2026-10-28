@@ -15,10 +15,9 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-using CADImport;
-using CADImport.FaceModule;
 using System;
 using System.Diagnostics;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using UserControl = System.Windows.Controls.UserControl;
@@ -27,16 +26,15 @@ namespace QuickLook.Plugin.CADImport;
 
 public partial class RenderPanel : UserControl, IDisposable
 {
-    private CADImaging cadImaging;
-    private CADPictureBox cadPictBox;
+    private CadPreviewControl previewControl;
     private CancellationTokenSource _cts;
 
     public RenderPanel()
     {
         InitializeComponent();
 
-        cadImaging = new(cadPictBox = new CADPictureBox());
-        presenter.Child = cadPictBox;
+        previewControl = new CadPreviewControl();
+        presenter.Child = previewControl;
     }
 
     public void Dispose()
@@ -45,11 +43,8 @@ public partial class RenderPanel : UserControl, IDisposable
         _cts?.Dispose();
         _cts = null;
 
-        cadImaging?.Dispose();
-        cadImaging = null;
-
-        cadPictBox?.Dispose();
-        cadPictBox = null;
+        previewControl?.Dispose();
+        previewControl = null;
     }
 
     public void LoadCadFileAsync(string path, Action onLoaded = null)
@@ -59,32 +54,51 @@ public partial class RenderPanel : UserControl, IDisposable
         _cts?.Dispose();
         _cts = new CancellationTokenSource();
         var token = _cts.Token;
+        int readyNotified = 0;
+        void NotifyReady()
+        {
+            if (Interlocked.Exchange(ref readyNotified, 1) == 0)
+                onLoaded?.Invoke();
+        }
 
         Task.Run(() =>
         {
             if (token.IsCancellationRequested)
-                return null;
+                return (CadScene)null;
 
-            CADImage image = null;
-            try
+            CadScene scene;
+            if (string.Equals(Path.GetExtension(path), ".dwg", StringComparison.OrdinalIgnoreCase))
             {
-                image = CADImage.CreateImageByExtension(path);
-                if (image != null)
+                using (var reader = new ACadSharp.IO.DwgReader(path))
                 {
-                    CADImaging.ConfigureImageFonts(image);
-                    if (CADConst.IsWebPath(path))
-                        image.LoadFromWeb(path);
-                    else
-                        image.LoadFromFile(path);
+                    var preview = reader.ReadPreview();
+                    var thumbnail = CadPreviewControl.DecodeEmbeddedPreview(preview);
+                    if (thumbnail != null)
+                    {
+                        Dispatcher.BeginInvoke(new Action(() =>
+                        {
+                            if (token.IsCancellationRequested || previewControl == null)
+                                thumbnail.Dispose();
+                            else
+                            {
+                                previewControl.SetThumbnail(thumbnail);
+                                NotifyReady();
+                            }
+                        }));
+                    }
+
+                    if (token.IsCancellationRequested)
+                        return null;
+
+                    scene = CadSceneBuilder.Build(reader.Read(), token);
                 }
             }
-            catch
+            else
             {
-                image?.Dispose();
-                throw;
+                scene = CadSceneBuilder.Build(ACadSharp.IO.DxfReader.Read(path), token);
             }
 
-            return image;
+            return scene;
         }, token).ContinueWith(t => Dispatcher.BeginInvoke(new Action(() =>
         {
             if (t.IsCanceled)
@@ -94,33 +108,29 @@ public partial class RenderPanel : UserControl, IDisposable
             {
                 Debug.WriteLine($"Error loading CAD file: {t.Exception}");
                 ShowLoadError();
-                onLoaded?.Invoke();
+                NotifyReady();
                 return;
             }
 
-            var loadedImage = t.Result;
+            var loadedScene = t.Result;
             if (token.IsCancellationRequested)
-            {
-                loadedImage?.Dispose();
                 return;
-            }
 
-            if (loadedImage == null)
+            if (loadedScene == null)
             {
                 ShowLoadError();
-                onLoaded?.Invoke();
+                NotifyReady();
                 return;
             }
 
-            if (cadImaging == null)
+            if (previewControl == null)
             {
-                loadedImage.Dispose();
                 return;
             }
 
             try
             {
-                cadImaging.ApplyLoadedImage(loadedImage, path);
+                previewControl.SetScene(loadedScene);
             }
             catch (Exception ex)
             {
@@ -129,26 +139,19 @@ public partial class RenderPanel : UserControl, IDisposable
             }
             finally
             {
-                onLoaded?.Invoke();
+                NotifyReady();
             }
         })), CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
     }
 
     private void ShowLoadError()
     {
-        loadErrorMessage.Text = "Unable to preview this CAD file.";
+        loadErrorMessage.Text = "Unable to render this CAD file.";
         loadErrorMessage.Visibility = System.Windows.Visibility.Visible;
-    }
-
-    public void LoadCadFile(string path)
-    {
-        cadImaging?.LoadFile(path);
-        cadPictBox?.Invalidate();
     }
 
     public void SetTheme(bool isDark)
     {
-        if (cadImaging != null)
-            cadImaging.IsDark = isDark;
+        previewControl?.SetTheme(isDark);
     }
 }

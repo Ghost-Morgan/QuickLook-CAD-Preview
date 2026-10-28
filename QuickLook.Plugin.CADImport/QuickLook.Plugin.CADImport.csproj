@@ -29,7 +29,9 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <None Include="..\QuickLook.Plugin.Metadata.config">
+        <None Include="..\QuickLook.Plugin.Metadata.Base.config">
+            <Link>QuickLook.Plugin.Metadata.config</Link>
+            <TargetPath>QuickLook.Plugin.Metadata.config</TargetPath>
             <CopyToOutputDirectory>Always</CopyToOutputDirectory>
         </None>
     </ItemGroup>
@@ -38,13 +40,11 @@
         <!-- Remove QuickLook.Common.dll -->
         <Delete Files="$(OutputPath)\QuickLook.Common.dll" Condition="Exists('$(OutputPath)\QuickLook.Common.dll')" />
         <Delete Files="$(OutputPath)\QuickLook.Common.pdb" Condition="Exists('$(OutputPath)\QuickLook.Common.pdb')" />
+        <Delete Files="$(OutputPath)\CADImport.dll" Condition="Exists('$(OutputPath)\CADImport.dll')" />
     </Target>
 
     <ItemGroup>
-        <Reference Include="CADImport">
-            <HintPath>.\CADImport.dll</HintPath>
-            <Private>true</Private>
-        </Reference>
+        <PackageReference Include="ACadSharp" Version="3.8.30" />
         <PackageReference Include="Costura.Fody" Version="6.0.0" Condition=" '$(Configuration)' == 'Release'">
             <PrivateAssets>all</PrivateAssets>
             <IncludeAssets>compile; runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>

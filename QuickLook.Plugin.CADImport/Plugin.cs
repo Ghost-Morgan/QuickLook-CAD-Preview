@@ -15,12 +15,9 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-using CADImport;
 using QuickLook.Common.Helpers;
 using QuickLook.Common.Plugin;
 using System;
-using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Windows;
@@ -33,8 +30,6 @@ public class Plugin : IViewer
     [
         ".dwg", // AutoCAD Binary Drawing Format
         ".dxf", // AutoCAD Drawing Exchange Format
-        ".plt", // Hewlett-Packard Graphics Language
-        ".cgm", // Computer Graphics Metafile
     ];
 
     private static double _width = 900;
@@ -44,74 +39,12 @@ public class Plugin : IViewer
 
     public void Init()
     {
-        CADConst.UseSHXFonts = true;
-        CADConst.UseTTFFonts = true;
-        ConfigureSHXSearchPaths();
-    }
-
-    private static void ConfigureSHXSearchPaths()
-    {
-        var searchPaths = new List<string>();
-        foreach (var existingPath in (CADConst.SHXSearchPaths ?? string.Empty).Split(Path.PathSeparator))
-        {
-            AddFontSearchPath(searchPaths, existingPath);
-        }
-
-        var installationRoots = new[]
-        {
-            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
-            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
-        };
-
-        foreach (var root in installationRoots)
-        {
-            if (string.IsNullOrEmpty(root))
-                continue;
-
-            var autodeskRoot = Path.Combine(root, "Autodesk");
-            if (!Directory.Exists(autodeskRoot))
-                continue;
-
-            try
-            {
-                foreach (var installPath in Directory.GetDirectories(autodeskRoot))
-                {
-                    var name = Path.GetFileName(installPath);
-                    if (name.StartsWith("AutoCAD", StringComparison.OrdinalIgnoreCase) ||
-                        name.StartsWith("DWG TrueView", StringComparison.OrdinalIgnoreCase))
-                    {
-                        AddFontSearchPath(searchPaths, Path.Combine(installPath, "Fonts"));
-                    }
-                }
-            }
-            catch (UnauthorizedAccessException ex)
-            {
-                Debug.WriteLine($"Unable to inspect Autodesk font directories: {ex}");
-            }
-        }
-
-        var commonProgramFiles = Environment.GetFolderPath(Environment.SpecialFolder.CommonProgramFiles);
-        AddFontSearchPath(searchPaths, Path.Combine(commonProgramFiles, "Autodesk Shared", "Fonts"));
-
-        if (searchPaths.Count > 0)
-        {
-            CADConst.SHXSearchPaths = string.Join(Path.PathSeparator.ToString(), searchPaths);
-            CADConst.SearchSHXPaths = true;
-        }
-    }
-
-    private static void AddFontSearchPath(List<string> paths, string path)
-    {
-        if (Directory.Exists(path) &&
-            !paths.Exists(existingPath => string.Equals(existingPath, path, StringComparison.OrdinalIgnoreCase)))
-        {
-            paths.Add(path);
-        }
     }
 
     public bool CanHandle(string path)
     {
-        return !Directory.Exists(path) && _extensions.Any(path.ToLower().EndsWith);
+        return !Directory.Exists(path) &&
+               _extensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase);
     }
 
     public void Prepare(string path, ContextObject context)
