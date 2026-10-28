@@ -68,10 +68,12 @@ public partial class RenderPanel : UserControl, IDisposable
             if (token.IsCancellationRequested)
                 return (CadScene)null;
 
+            var loadTimer = Stopwatch.StartNew();
             Bitmap cachedThumbnail = CadPreviewCache.TryLoad(path, isDark);
             bool hasCachedThumbnail = cachedThumbnail != null;
             if (cachedThumbnail != null)
             {
+                Debug.WriteLine($"Loaded cached CAD preview in {loadTimer.ElapsedMilliseconds} ms.");
                 Dispatcher.BeginInvoke(new Action(() =>
                 {
                     if (token.IsCancellationRequested || previewControl == null)
@@ -101,7 +103,9 @@ public partial class RenderPanel : UserControl, IDisposable
                                     thumbnail.Dispose();
                                 else
                                 {
-                                    previewControl.SetThumbnail(thumbnail);
+                                    previewControl.SetThumbnail(
+                                        thumbnail,
+                                        preview.Code == ACadSharp.DwgPreview.PreviewType.Wmf);
                                     NotifyReady();
                                 }
                             }));
@@ -111,14 +115,25 @@ public partial class RenderPanel : UserControl, IDisposable
                     if (token.IsCancellationRequested)
                         return null;
 
-                    scene = CadSceneBuilder.Build(reader.Read(), token);
+                    var readTimer = Stopwatch.StartNew();
+                    var document = reader.Read();
+                    Debug.WriteLine($"Read DWG document in {readTimer.ElapsedMilliseconds} ms.");
+                    var sceneTimer = Stopwatch.StartNew();
+                    scene = CadSceneBuilder.Build(document, token);
+                    Debug.WriteLine($"Built DWG preview scene in {sceneTimer.ElapsedMilliseconds} ms.");
                 }
             }
             else
             {
-                scene = CadSceneBuilder.Build(ACadSharp.IO.DxfReader.Read(path), token);
+                var readTimer = Stopwatch.StartNew();
+                var document = ACadSharp.IO.DxfReader.Read(path);
+                Debug.WriteLine($"Read DXF document in {readTimer.ElapsedMilliseconds} ms.");
+                var sceneTimer = Stopwatch.StartNew();
+                scene = CadSceneBuilder.Build(document, token);
+                Debug.WriteLine($"Built DXF preview scene in {sceneTimer.ElapsedMilliseconds} ms.");
             }
 
+            Debug.WriteLine($"Loaded CAD preview in {loadTimer.ElapsedMilliseconds} ms.");
             return scene;
         }, token).ContinueWith(t => Dispatcher.BeginInvoke(new Action(() =>
         {

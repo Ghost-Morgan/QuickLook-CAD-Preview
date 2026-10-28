@@ -199,6 +199,10 @@ internal sealed class CadScene
         if (!HasBounds || geometryCount < 32)
             return;
 
+        double planarExtent = Math.Max(MaxX - MinX, MaxY - MinY);
+        if (MaxZ - MinZ <= Math.Max(1e-9, planarExtent * 1e-9))
+            return;
+
         var minXBounds = new double[geometryCount];
         var minYBounds = new double[geometryCount];
         var minZBounds = new double[geometryCount];
