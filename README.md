@@ -16,7 +16,7 @@
 ![Platform: Windows](https://img.shields.io/badge/Platform-Windows-00b0ff?style=for-the-badge)
 ![CAD formats: DWG and DXF](https://img.shields.io/badge/Formats-DWG%20%2B%20DXF-7c4dff?style=for-the-badge)
 
-[Getting started](#getting-started) · [Features](#features) · [Build](#build-from-source) · [Documentation](#documentation)
+[Project site](https://ghost-morgan.github.io/QuickLook-CAD-Preview/) · [Getting started](#getting-started) · [Features](#features) · [Build](#build-from-source) · [Documentation](#documentation)
 
 </div>
 
@@ -73,7 +73,7 @@ does not scan folders in the background.
 
 1. Install [QuickLook](https://github.com/QL-Win/QuickLook/releases).
 2. Download `QuickLook.Plugin.CADImport.qlplugin` from the
-   [latest release](https://github.com/Ghost-Morgan/QuickLook.Plugin.self/releases/latest),
+   [latest release](https://github.com/Ghost-Morgan/QuickLook-CAD-Preview/releases/latest),
    or build it from source.
 3. In File Explorer, select the `.qlplugin` file and press **Spacebar**.
 4. Confirm the QuickLook installation prompt.
