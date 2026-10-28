@@ -47,9 +47,23 @@ Large scenes are limited to 250,000 geometry elements to keep previews bounded.
 
 ## Build and installation
 
-See [INSTALLATION_GUIDE.md](INSTALLATION_GUIDE.md) for installing the
-`.qlplugin` package and building from source. Architecture details and known
-limits are in [CHANGES_AND_ARCHITECTURE.md](CHANGES_AND_ARCHITECTURE.md).
+The current verification build is **1.0.0**. On Windows, initialize the
+QuickLook.Common source dependency and build the installable package from the
+repository root:
+
+```powershell
+git submodule update --init --recursive
+.\Scripts\update-version.ps1
+dotnet build .\QuickLook.Plugin.CADImport.sln -c Release
+.\Scripts\pack-zip.ps1
+```
+
+The package is written to
+`QuickLook.Plugin.CADImport.qlplugin` in the repository root. Build output and
+the package are generated locally and are not source files. See
+[INSTALLATION_GUIDE.md](INSTALLATION_GUIDE.md) for installing the package.
+Architecture details and known limits are in
+[CHANGES_AND_ARCHITECTURE.md](CHANGES_AND_ARCHITECTURE.md).
 
 ## License
 

@@ -9,7 +9,9 @@ plugin for [QuickLook](https://github.com/QL-Win/QuickLook).
 
 1. Ensure **QuickLook** is installed and running on your system.
    - [QuickLook from Microsoft Store](https://www.microsoft.com/store/apps/9nv4bs3l1h4s) or [GitHub Releases](https://github.com/QL-Win/QuickLook/releases).
-2. Download or build the plugin file:
+2. Obtain the plugin package from a project release, or build it from source
+   using the steps in [README.md](README.md#build-and-installation). The
+   package file is:
    - `QuickLook.Plugin.CADImport.qlplugin`
    - The plugin uses the open-source ACadSharp library. No paid CAD engine or
      separate CAD application is required.

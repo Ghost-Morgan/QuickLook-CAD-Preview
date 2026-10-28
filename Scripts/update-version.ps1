@@ -1,8 +1,11 @@
-﻿$tag = git describe --always --tags "--abbrev=0"
-$revision = git describe --always --tags
+$tag = git describe --tags --abbrev=0 2>$null
+$revision = git rev-parse --short HEAD
 
-if ($tag -notmatch '^\d+(\.\d+){0,3}$') {
-    $tag = "0.0.0"
+if ($tag -match '^v?(\d+(\.\d+){0,3})$') {
+    $version = $Matches[1]
+}
+else {
+    $version = "1.0.0"
 }
 
 $text = @"
@@ -10,13 +13,14 @@ $text = @"
  
 using System.Reflection;
  
-[assembly: AssemblyVersion("$tag")]
-[assembly: AssemblyInformationalVersion("$revision")]
+[assembly: AssemblyVersion("$version")]
+[assembly: AssemblyFileVersion("$version")]
+[assembly: AssemblyInformationalVersion("$version+$revision")]
 "@
 
 $text | Out-File $PSScriptRoot\..\GitVersion.cs -Encoding utf8
 
 
 $xml = [xml](Get-Content $PSScriptRoot\..\QuickLook.Plugin.Metadata.Base.config)
-$xml.Metadata.Version="$revision"
+$xml.Metadata.Version="$version"
 $xml.Save("$PSScriptRoot\..\QuickLook.Plugin.Metadata.config")
