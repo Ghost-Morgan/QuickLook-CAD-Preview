@@ -29,7 +29,7 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <None Include="..\..\QuickLook.Plugin.Metadata.Base.config">
+        <None Include="..\..\QuickLook.Plugin.Metadata.config">
             <Link>QuickLook.Plugin.Metadata.config</Link>
             <TargetPath>QuickLook.Plugin.Metadata.config</TargetPath>
             <CopyToOutputDirectory>Always</CopyToOutputDirectory>
